@@ -3,6 +3,7 @@
 #include "model.h"
 #include "validator.h"
 #include "generator.h"
+#include "logger.h"
 
 // ГРУППЫ
 std::vector<Group> groups = {

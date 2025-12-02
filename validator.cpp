@@ -1,4 +1,5 @@
 #include "validator.h"
+#include "logger.h"
 #include <map>
 
 std::string findGroupNameById(const std::vector<Group>& groups, int groupId) {
@@ -69,7 +70,6 @@ void ScheduleValidator::checkGroupConflicts(
     const std::vector<ExamAssignment>& assignments,
     ValidationResult& result
 ) {
-    // map<(groupId, timeslotId), listOfExamIndexes> table;
     std::map<std::pair<int, int>, std::vector<int>> table;
 
     for (const ExamAssignment& a : assignments) {
@@ -80,39 +80,30 @@ void ScheduleValidator::checkGroupConflicts(
         int groupId = exam.groupId;
 
         std::pair<int, int> key(groupId, timeslotId);
-
-        // + этот экзамен в список для этой группы и слота
         table[key].push_back(examIndex);
     }
 
     for (const std::pair<std::pair<int, int>, std::vector<int>>& p : table) {
         if (p.second.size() > 1) {
-            // есть конфликт: у группы несколько экзаменов в одном слоте
             result.ok = false;
 
-            // сформировать сообщение об ошибке
-            // groupId = key.groupId
-            // timeslotId = key.timeslotId
             int groupId = p.first.first;
             int timeslotId = p.first.second;
 
-            // найти имя группы и информацию о слоте
             std::string groupName = findGroupNameById(groups, groupId);
-            // вид "2025-01-20 09:00–11:00"
             std::string timeslotInfo = findTimeslotDescription(timeslots, timeslotId);
                 
             std::string errorMessage = "Конфликт для группы " + groupName +
-                                        " в " + timeslotInfo +
-                                        ": назначено " + std::to_string(p.second.size()) +
-                                        " экзамен(ов) одновременно.";
-
-            // при желании можно добавить перечисление предметов:
-            // пройтись по examIndex внутри listOfExamIndexes и собрать названия
+                                       " в " + timeslotInfo +
+                                       ": назначено " + std::to_string(p.second.size()) +
+                                       " экзамен(ов) одновременно.";
 
             result.errors.push_back(errorMessage);
+            logError("[GroupConflict] " + errorMessage);
         }
     }
 }
+
 
 void ScheduleValidator::checkTeacherConflicts(
     const std::vector<Exam>& exams,
@@ -121,7 +112,6 @@ void ScheduleValidator::checkTeacherConflicts(
     const std::vector<ExamAssignment>& assignments,
     ValidationResult& result
 ) {
-    // map<(teacherId, timeslotId), listOfExamIndexes> table;
     std::map<std::pair<int, int>, std::vector<int>> table;
 
     for (const ExamAssignment& a : assignments) {
@@ -132,39 +122,30 @@ void ScheduleValidator::checkTeacherConflicts(
         int teacherId = exam.teacherId;
 
         std::pair<int, int> key(teacherId, timeslotId);
-
-        // + этот экзамен в список для этого препода и слота
         table[key].push_back(examIndex);
     }
 
     for (const std::pair<std::pair<int, int>, std::vector<int>>& p : table) {
         if (p.second.size() > 1) {
-            // есть конфликт: у препода несколько экзаменов в одном слоте
             result.ok = false;
 
-            // сформировать сообщение об ошибке
-            // groupId = key.groupId
-            // timeslotId = key.timeslotId
             int teacherId = p.first.first;
             int timeslotId = p.first.second;
 
-            // найти имя препода и информацию о слоте
             std::string teacherName = findTeacherNameById(teachers, teacherId);
-            // вид "2025-01-20 09:00–11:00"
             std::string timeslotInfo = findTimeslotDescription(timeslots, timeslotId);
                 
             std::string errorMessage = "Конфликт для преподавателя " + teacherName +
-                                        " в " + timeslotInfo +
-                                        ": назначено " + std::to_string(p.second.size()) +
-                                        " экзамен(ов) одновременно.";
-
-            // при желании можно добавить перечисление предметов:
-            // пройтись по examIndex внутри listOfExamIndexes и собрать названия
+                                       " в " + timeslotInfo +
+                                       ": назначено " + std::to_string(p.second.size()) +
+                                       " экзамен(ов) одновременно.";
 
             result.errors.push_back(errorMessage);
+            logError("[TeacherConflict] " + errorMessage);
         }
     }
 }
+
 
 void ScheduleValidator::checkRoomConflicts(
     const std::vector<Exam>& exams,
@@ -176,12 +157,15 @@ void ScheduleValidator::checkRoomConflicts(
 ) {
     // Конфликт по две пары в одной аудитории одновременно
     // (roomId, timeslotId) -> список examIndex
+    // (roomId, timeslotId) -> список examIndex
     std::map<std::pair<int, int>, std::vector<int>> table;
 
     for (const ExamAssignment& a : assignments) {
         int examIndex = a.examIndex;
         int timeslotId = a.timeslotId;
         int roomId = a.roomId;
+
+        if (roomId < 0) continue; // не учитываем "нет аудитории" в конфликте занятности
 
         std::pair<int, int> key(roomId, timeslotId);
         table[key].push_back(examIndex);
@@ -207,13 +191,23 @@ void ScheduleValidator::checkRoomConflicts(
                 " экзамен(ов) одновременно.";
 
             result.errors.push_back(errorMessage);
+            logError("[RoomConflict] " + errorMessage);
         }
     }
 
-    // Проверка вместимости аудитории
+    // Проверка вместимости
     for (const ExamAssignment& a : assignments) {
         int examIndex = a.examIndex;
         int roomId = a.roomId;
+
+        if (roomId < 0) {
+            result.ok = false;
+            std::string msg = "Экзамен с examIndex=" + std::to_string(examIndex) +
+                            " не имеет назначенной аудитории (roomId < 0).";
+            result.errors.push_back(msg);
+            logError("[RoomMissing] " + msg);
+            continue;
+        }
 
         const Exam& exam = exams[examIndex];
         int groupId = exam.groupId;
@@ -222,9 +216,11 @@ void ScheduleValidator::checkRoomConflicts(
         const Group* group = findGroupById(groups, groupId);
 
         if (!room || !group) {
-            // странная ситуация: нет такой аудитории или группы
             result.ok = false;
-            result.errors.push_back("Ошибка данных: не найдена аудитория или группа по id.");
+            std::string msg = "Ошибка данных: не найдена аудитория или группа по id (roomId=" +
+                            std::to_string(roomId) + ", groupId=" + std::to_string(groupId) + ").";
+            result.errors.push_back(msg);
+            logError("[RoomDataError] " + msg);
             continue;
         }
 
@@ -234,12 +230,14 @@ void ScheduleValidator::checkRoomConflicts(
             std::string roomName = room->name;
             std::string errorMessage =
                 "Аудитория " + roomName + " слишком мала для группы " + group->name +
-                ": вместительность-" + std::to_string(room->capacity) +
-                ", количество людей-" + std::to_string(group->peopleCount) + ".";
+                ": capacity=" + std::to_string(room->capacity) +
+                ", peopleCount=" + std::to_string(group->peopleCount) + ".";
 
             result.errors.push_back(errorMessage);
+            logError("[RoomCapacity] " + errorMessage);
         }
-    }
+}
+
 }
 
 void ScheduleValidator::checkSessionBounds(
@@ -260,6 +258,7 @@ void ScheduleValidator::checkSessionBounds(
                 sessionStartDate + " - " + sessionEndDate + ".";
 
             result.errors.push_back(errorMessage);
+            logError("[SessionBounds] " + errorMessage);
         }
     }
 }
@@ -297,6 +296,7 @@ void ScheduleValidator::checkAllExamsAssigned(
                 " не назначен ни в один слот.";
 
             result.errors.push_back(errorMessage);
+            logError("[ExamNotAssigned] " + errorMessage);
         }
         else if (counts[i] > 1) {
             result.ok = false;
@@ -307,6 +307,7 @@ void ScheduleValidator::checkAllExamsAssigned(
                 " раз(а) в расписании.";
 
             result.errors.push_back(errorMessage);
+            logError("[ExamMultiAssigned] " + errorMessage);
         }
     }
 }
@@ -378,32 +379,32 @@ ValidationResult ScheduleValidator::checkAll(
     const std::vector<ExamAssignment>& assignments,
     const std::string& sessionStartDate,
     const std::string& sessionEndDate,
-    int maxExamsPerDayForGroup = 1
+    int maxExamsPerDayForGroup
 ) {
     ValidationResult result;
     result.ok = true;
 
-    // Все экзамены назначены и не продублированы
+    logInfo("=== Запуск проверки расписания ===");
+    logInfo("Экзаменов: " + std::to_string(exams.size()) +
+            ", назначений: " + std::to_string(assignments.size()) +
+            ", групп: " + std::to_string(groups.size()) +
+            ", преподавателей: " + std::to_string(teachers.size()) +
+            ", аудиторий: " + std::to_string(rooms.size()) +
+            ", слотов: " + std::to_string(timeslots.size()));
+
     checkAllExamsAssigned(exams, assignments, result);
-
-    // Группы (не два экзамена в один слот)
     checkGroupConflicts(exams, groups, timeslots, assignments, result);
-
-    // Преподаватели
     checkTeacherConflicts(exams, teachers, timeslots, assignments, result);
-
-    // Аудитории (конфликт + вместимость)
     checkRoomConflicts(exams, groups, rooms, timeslots, assignments, result);
-
-    // Все слоты попадают в период сессии
     checkSessionBounds(timeslots, sessionStartDate, sessionEndDate, result);
+    checkMaxExamsPerDayForGroup(exams, groups, timeslots, assignments, maxExamsPerDayForGroup, result);
 
-    // Не больше N экзаменов в день для одной группы
-    checkMaxExamsPerDayForGroup(
-        exams, groups, timeslots, assignments,
-        maxExamsPerDayForGroup,
-        result
-    );
+    if (result.ok) {
+        logInfo("Проверка расписания завершена: ошибок не обнаружено.");
+    } else {
+        logWarning("Проверка расписания завершена: обнаружено ошибок = " +
+                   std::to_string(result.errors.size()));
+    }
 
     return result;
 }
