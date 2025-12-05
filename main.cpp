@@ -94,18 +94,39 @@ std::string sessionEnd   = "2025-01-23";
 int maxExamsPerDayForGroup = 2; // например, не больше 2 экзаменов в день на группу
 
 
-int main() {
+int main(int argc, char** argv) {
     // сюда вставляешь те вектора, что выше:
     // groups, teachers, rooms, subjects, timeslots, exams
 
+    std::string algo = "graph"; 
+
+    if (argc > 1) {
+        algo = argv[1]; // например: "simple" или "graph"
+    }
+
+    logInfo("Выбран алгоритм генерации: " + algo);
+
     // 1. Генерация расписания
-    std::vector<ExamAssignment> assignments = generateSchedule(
-        exams,
-        groups,
-        subjects,
-        timeslots,
-        rooms
-    );
+    std::vector<ExamAssignment> assignments;
+
+    if (algo == "simple") {
+        assignments = generateScheduleSimple(
+            exams,
+            groups,
+            subjects,
+            timeslots,
+            rooms
+        );
+    } else {
+        // по умолчанию — твой "умный" алгоритм с графом и эвристикой сложности
+        assignments = generateSchedule(
+            exams,
+            groups,
+            subjects,
+            timeslots,
+            rooms
+        );
+    }
 
     std::cout << "Сгенерированное расписание:\n";
     for (const ExamAssignment& a : assignments) {

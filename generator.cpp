@@ -148,11 +148,58 @@ std::vector<ExamAssignment> generateSchedule(
         const Group* group = findGroupByIdForScheduler(groupId);
     
         logDebug("Назначаем exam id=" + std::to_string(exam.id) +
-                 " (groupId=" + std::to_string(exam.groupId) +
-                 ", color=" + std::to_string(color) +
-                 ") в слот id=" + std::to_string(timeslotId));
-    
+             " (groupId=" + std::to_string(exam.groupId) +
+             ", color=" + std::to_string(color) +
+             ") в слот id=" + std::to_string(timeslotId));
+
         int chosenRoomId = -1;
+
+        // Сначала проверим: нет ли в базовом слоте конфликтов по графу
+        bool baseSlotHasConflict = false;
+        for (const ExamAssignment& other : assignments) {
+            if (other.timeslotId != timeslotId) continue;
+
+            int otherExamIndex = other.examIndex;
+            if (g.adj[examIndex][otherExamIndex]) {
+                baseSlotHasConflict = true;
+                break;
+            }
+        }
+
+        if (!baseSlotHasConflict) {
+            // Ищем аудиторию с достаточной вместимостью и незанятую в этот слот
+            for (const Room& r : rooms) {
+                bool alreadyUsed = false;
+                auto it = usedRooms.find(timeslotId);
+                if (it != usedRooms.end()) {
+                    for (int usedId : it->second) {
+                        if (usedId == r.id) {
+                            alreadyUsed = true;
+                            break;
+                        }
+                    }
+                }
+
+                bool capacityOk = true;
+                if (group) {
+                    capacityOk = (r.capacity >= group->peopleCount);
+                }
+
+                if (!alreadyUsed && capacityOk) {
+                    chosenRoomId = r.id;
+                    usedRooms[timeslotId].push_back(r.id);
+
+                    logInfo("Экзамен id=" + std::to_string(exam.id) +
+                            " назначен в аудиторию " + r.name +
+                            " (capacity=" + std::to_string(r.capacity) + ")");
+                    break;
+                }
+            }
+        } else {
+            logWarning("В базовом слоте " + std::to_string(timeslotId) +
+                    " для exam id=" + std::to_string(exam.id) +
+                    " найден конфликт по графу. Базовый слот пропускаем.");
+        }
     
         for (const Room& r : rooms) {
             bool alreadyUsed = false;
@@ -183,10 +230,88 @@ std::vector<ExamAssignment> generateSchedule(
         }
     
         if (chosenRoomId == -1) {
-            logError("НЕ НАЙДЕНА аудитория для exam id=" +
-                     std::to_string(exam.id) +
-                     " (group=" + std::to_string(exam.groupId) +
-                     ", slot=" + std::to_string(timeslotId) + ")");
+            logWarning("НЕ НАЙДЕНА аудитория в базовом слоте для exam id=" +
+                       std::to_string(exam.id) +
+                       " (group=" + std::to_string(exam.groupId) +
+                       ", slot=" + std::to_string(timeslotId) +
+                       "). Пробуем альтернативные слоты.");
+    
+            int newTimeslotId = timeslotId; // по умолчанию остаётся старый
+            int newRoomId = -1;
+    
+            // перебираем ВСЕ слоты в порядке timeslotOrder
+            for (int altOrderIndex = 0; altOrderIndex < (int)timeslotOrder.size(); ++altOrderIndex) {
+                int altTsIndex = timeslotOrder[altOrderIndex];
+                const Timeslot& altTs = timeslots[altTsIndex];
+                int altTimeslotId = altTs.id;
+    
+                // можно пропустить исходный слот
+                if (altTimeslotId == timeslotId) continue;
+    
+                // 1) проверяем конфликты по графу:
+                //    в этом слоте уже стоят какие-то экзамены -> нельзя, если есть ребро
+                bool hasConflict = false;
+                for (const ExamAssignment& other : assignments) {
+                    if (other.timeslotId != altTimeslotId) continue;
+    
+                    int otherExamIndex = other.examIndex;
+                    // если в графе есть ребро, значит экзамены конфликтуют
+                    if (g.adj[examIndex][otherExamIndex]) {
+                        hasConflict = true;
+                        break;
+                    }
+                }
+    
+                if (hasConflict) {
+                    continue; // этот слот не подходит
+                }
+    
+                // 2) пробуем найти аудиторию в ЭТОМ слоте
+                for (const Room& r : rooms) {
+                    bool alreadyUsed = false;
+                    auto it2 = usedRooms.find(altTimeslotId);
+                    if (it2 != usedRooms.end()) {
+                        for (int usedId : it2->second) {
+                            if (usedId == r.id) {
+                                alreadyUsed = true;
+                                break;
+                            }
+                        }
+                    }
+    
+                    bool capacityOk = true;
+                    if (group) {
+                        capacityOk = (r.capacity >= group->peopleCount);
+                    }
+    
+                    if (!alreadyUsed && capacityOk) {
+                        newTimeslotId = altTimeslotId;
+                        newRoomId = r.id;
+                        usedRooms[altTimeslotId].push_back(r.id);
+    
+                        logInfo("Переназначили exam id=" + std::to_string(exam.id) +
+                                " в альтернативный слот " + std::to_string(newTimeslotId) +
+                                " в аудиторию " + r.name +
+                                " (capacity=" + std::to_string(r.capacity) + ")");
+                        break;
+                    }
+                }
+    
+                if (newRoomId != -1) {
+                    break; // нашли подходящий слот и аудиторию
+                }
+            }
+    
+            if (newRoomId != -1) {
+                // удачно переназначили
+                timeslotId   = newTimeslotId;
+                chosenRoomId = newRoomId;
+            } else {
+                // даже после попытки переназначения ничего не вышло
+                logError("Даже после поиска альтернативных слотов НЕ НАЙДЕНА аудитория для exam id=" +
+                         std::to_string(exam.id) +
+                         " (group=" + std::to_string(exam.groupId) + ").");
+            }
         }
     
         ExamAssignment a;
@@ -199,5 +324,122 @@ std::vector<ExamAssignment> generateSchedule(
     
 
     logInfo("=== Генерация расписания завершена ===");
+    return assignments;
+}
+
+std::vector<ExamAssignment> generateScheduleSimple(
+    const std::vector<Exam>& exams,
+    const std::vector<Group>& groups,
+    const std::vector<Subject>& subjects,   // здесь не используем, но оставляем для совместимости
+    const std::vector<Timeslot>& timeslots,
+    const std::vector<Room>& rooms
+) {
+    logInfo("=== Запуск простого генератора расписания (simple) ===");
+
+    std::vector<ExamAssignment> assignments;
+    if (exams.empty()) {
+        logWarning("Список экзаменов пуст. Простое расписание не будет создано.");
+        return assignments;
+    }
+
+    // Для контроля занятости:
+    // (groupId, timeslotId)   -> уже есть экзамен
+    // (teacherId, timeslotId) -> уже есть экзамен
+    // (roomId, timeslotId)    -> аудитория занята
+    std::map<std::pair<int,int>, bool> usedGroupSlot;
+    std::map<std::pair<int,int>, bool> usedTeacherSlot;
+    std::map<std::pair<int,int>, bool> usedRoomSlot;
+
+    // Сортируем слоты по дате/времени (как в основном генераторе)
+    std::vector<int> timeslotOrder(timeslots.size());
+    for (int i = 0; i < (int)timeslots.size(); ++i) timeslotOrder[i] = i;
+
+    std::sort(timeslotOrder.begin(), timeslotOrder.end(),
+        [&](int i, int j) {
+            const Timeslot& a = timeslots[i];
+            const Timeslot& b = timeslots[j];
+            if (a.date != b.date) return a.date < b.date;
+            return a.startMinutes < b.startMinutes;
+        }
+    );
+
+    auto findGroupByIdForScheduler = [&](int groupId) -> const Group* {
+        for (const Group& g : groups) if (g.id == groupId) return &g;
+        return nullptr;
+    };
+
+    for (int examIndex = 0; examIndex < (int)exams.size(); ++examIndex) {
+        const Exam& exam = exams[examIndex];
+        int groupId   = exam.groupId;
+        int teacherId = exam.teacherId;
+
+        const Group* group = findGroupByIdForScheduler(groupId);
+
+        bool placed = false;
+        int chosenTimeslotId = -1;
+        int chosenRoomId = -1;
+
+        logDebug("SIMPLE: пытаемся расположить exam id=" + std::to_string(exam.id) +
+                 " (groupId=" + std::to_string(groupId) +
+                 ", teacherId=" + std::to_string(teacherId) + ")");
+
+        // Перебираем слоты по порядку
+        for (int tsOrderIndex = 0; tsOrderIndex < (int)timeslotOrder.size() && !placed; ++tsOrderIndex) {
+            int tsIndex = timeslotOrder[tsOrderIndex];
+            const Timeslot& ts = timeslots[tsIndex];
+            int timeslotId = ts.id;
+
+            std::pair<int,int> gk(groupId, timeslotId);
+            std::pair<int,int> tk(teacherId, timeslotId);
+
+            // проверка, не занята ли группа/препод в этот слот
+            if (usedGroupSlot[gk] || usedTeacherSlot[tk]) {
+                continue;
+            }
+
+            // ищем аудиторию
+            for (const Room& r : rooms) {
+                std::pair<int,int> rk(r.id, timeslotId);
+
+                if (usedRoomSlot[rk]) continue;
+
+                bool capacityOk = true;
+                if (group) {
+                    capacityOk = (r.capacity >= group->peopleCount);
+                }
+
+                if (!capacityOk) continue;
+
+                // нашли подходящую комнату
+                chosenTimeslotId = timeslotId;
+                chosenRoomId     = r.id;
+
+                usedGroupSlot[gk]   = true;
+                usedTeacherSlot[tk] = true;
+                usedRoomSlot[rk]    = true;
+
+                placed = true;
+
+                logInfo("SIMPLE: exam id=" + std::to_string(exam.id) +
+                        " поставлен в слот " + std::to_string(timeslotId) +
+                        " в аудиторию " + r.name);
+                break;
+            }
+        }
+
+        if (!placed) {
+            logError("SIMPLE: не удалось назначить exam id=" + std::to_string(exam.id) +
+                     " (groupId=" + std::to_string(groupId) + ")");
+        }
+
+        ExamAssignment a;
+        a.examIndex  = examIndex;
+        a.timeslotId = chosenTimeslotId; // может быть -1, если не нашли слот
+        a.roomId     = chosenRoomId;     // может быть -1, если не нашли аудиторию
+
+        assignments.push_back(a);
+    }
+
+    logInfo("=== Простой генератор (simple) завершил работу ===");
     return assignments;
 }
