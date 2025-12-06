@@ -44,8 +44,8 @@ function App() {
   const handleGenerate = async () => {
     try {
       const resp = await fetch(
-        `http://localhost:8080/api/schedule?algo=${algorithm}`
-      );
+        `https://localhost:8443/api/schedule?algo=${algorithm}`
+      );      
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
