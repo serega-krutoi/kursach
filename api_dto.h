@@ -1,4 +1,5 @@
 #pragma once
+
 #include <string>
 #include <vector>
 
@@ -14,8 +15,30 @@ struct ExamView {
 };
 
 struct ApiResponse {
-    std::string algorithm;              // "graph" или "simple"
-    std::vector<ExamView> schedule;
-    bool ok;
-    std::vector<std::string> errors;
+    std::string algorithm;              // "graph" / "simple"
+    std::vector<ExamView> schedule;     // то, что идёт в mockData.schedule
+    bool ok;                            // validation.ok
+    std::vector<std::string> errors;    // validation.errors
 };
+
+// объявление функций
+class Group;
+class Teacher;
+class Subject;
+class Room;
+class Timeslot;
+class Exam;
+struct ExamAssignment;
+struct ValidationResult;
+
+std::vector<ExamView> buildExamViews(
+    const std::vector<Exam>& exams,
+    const std::vector<Group>& groups,
+    const std::vector<Teacher>& teachers,
+    const std::vector<Subject>& subjects,
+    const std::vector<Room>& rooms,
+    const std::vector<Timeslot>& timeslots,
+    const std::vector<ExamAssignment>& assignments
+);
+
+void printApiResponseJson(const ApiResponse& resp);

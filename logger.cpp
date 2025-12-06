@@ -26,9 +26,11 @@ namespace {
         std::time_t t = system_clock::to_time_t(now);
         std::tm tm{};
     #if defined(_WIN32) || defined(_WIN64)
-        localtime_s(&tm, &t);
+        localtime_s(&tm, &t); 
+
     #else
-        localtime_r(&t, &tm);
+        localtime_r(&t, &tm);   
+
     #endif
         char buf[32];
         std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
@@ -47,7 +49,7 @@ void logMessage(LogLevel level, const std::string& msg) {
     std::lock_guard<std::mutex> lock(logMutex);
     ensureInitialized();
 
-    std::string timeStr = currentTimeString();
+    std::string timeStr  = currentTimeString();
     std::string levelStr = levelToString(level);
 
     std::string full = "[" + timeStr + "][" + levelStr + "] " + msg + "\n";
@@ -57,12 +59,8 @@ void logMessage(LogLevel level, const std::string& msg) {
         logFile.flush();
     }
 
-    // по желанию можно логгировать и в консоль
-    if (level == LogLevel::Error || level == LogLevel::Warning) {
-        std::cerr << full;
-    } else {
-        std::cout << full;
-    }
+    // ВСЁ: в консоль только через stderr, stdout не трогаем
+    std::cerr << full;
 }
 
 void logInfo(const std::string& msg)    { logMessage(LogLevel::Info, msg); }
