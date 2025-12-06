@@ -1,5 +1,7 @@
 #include <iostream>
 #include <vector>
+#include "api_dto.h"
+#include "api_json.cpp" 
 #include "model.h"
 #include "validator.h"
 #include "generator.h"
@@ -95,76 +97,37 @@ int maxExamsPerDayForGroup = 2; // например, не больше 2 экз�
 
 
 int main(int argc, char** argv) {
-    // сюда вставляешь те вектора, что выше:
-    // groups, teachers, rooms, subjects, timeslots, exams
+    // ... загружаешь данные (groups, exams, teachers, rooms, timeslots, subjects)
+    // ... читаешь параметр алгоритма (graph/simple)
 
-    std::string algo = "graph"; 
+    std::string algorithm = "graph"; // допустим
 
-    if (argc > 1) {
-        algo = argv[1]; // например: "simple" или "graph"
-    }
-
-    logInfo("Выбран алгоритм генерации: " + algo);
-
-    // 1. Генерация расписания
     std::vector<ExamAssignment> assignments;
-
-    if (algo == "simple") {
-        assignments = generateScheduleSimple(
-            exams,
-            groups,
-            subjects,
-            timeslots,
-            rooms
+    if (algorithm == "graph") {
+        assignments = generateSchedule(
+            exams, groups, subjects, timeslots, rooms
         );
     } else {
-        // по умолчанию — твой "умный" алгоритм с графом и эвристикой сложности
-        assignments = generateSchedule(
-            exams,
-            groups,
-            subjects,
-            timeslots,
-            rooms
+        assignments = generateScheduleSimple(
+            exams, groups, subjects, timeslots, rooms
         );
     }
 
-    std::cout << "Сгенерированное расписание:\n";
-    for (const ExamAssignment& a : assignments) {
-        const Exam& e = exams[a.examIndex];
-        std::cout << "Exam id=" << e.id
-                  << " groupId=" << e.groupId
-                  << " teacherId=" << e.teacherId
-                  << " timeslotId=" << a.timeslotId
-                  << " roomId=" << a.roomId << "\n";
-    }
-
-    // 2. Валидация
     ScheduleValidator validator;
-
-    std::string sessionStart = "2025-01-20";
-    std::string sessionEnd   = "2025-01-23";
-    int maxExamsPerDayForGroup = 2;
-
-    ValidationResult res = validator.checkAll(
-        exams,
-        groups,
-        teachers,
-        rooms,
-        timeslots,
-        assignments,
-        sessionStart,
-        sessionEnd,
-        maxExamsPerDayForGroup
+    ValidationResult vr;
+    validator.validate(
+        exams, groups, teachers, rooms, timeslots, assignments, vr
     );
 
-    std::cout << "\nРезультат проверки:\n";
-    if (!res.ok) {
-        for (const std::string& err : res.errors) {
-            std::cout << " - " << err << "\n";
-        }
-    } else {
-        std::cout << "Расписание корректно.\n";
-    }
+    ApiResponse resp;
+    resp.algorithm = algorithm;
+    resp.schedule  = buildExamViews(
+        exams, groups, teachers, subjects, rooms, timeslots, assignments
+    );
+    resp.ok     = vr.ok;
+    resp.errors = vr.errors;
+
+    printApiResponseJson(resp);
 
     return 0;
 }
