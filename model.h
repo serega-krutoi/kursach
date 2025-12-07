@@ -41,3 +41,9 @@ struct Exam {
     int subjectId;
     int duration;
 };
+
+struct ExamAssignment {
+    int examIndex;   // индекс экзамена в векторе exams
+    int timeslotId;  // id таймслота (Timeslot.id)
+    int roomId;      // id аудитории (Room.id)
+};

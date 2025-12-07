@@ -2,12 +2,6 @@
 
 #pragma once
 
-struct ExamAssignment {
-    int examIndex;   // индекс экзамена в векторе exams
-    int timeslotId;  // какой слот (id из Timeslot)
-    int roomId;      // какая аудитория (id из Room)
-};
-
 struct ValidationResult {
     bool ok;                             // true, если ошибок нет
     std::vector<std::string> errors;     // фатальные ошибки (конфликты)
