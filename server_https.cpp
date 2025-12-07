@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdio>
 
 #include "model.h"
 #include "generator.h"
@@ -58,14 +59,24 @@ static std::string makeJsonResponse(
     // 1. Генерация
     std::vector<ExamAssignment> assignments;
     if (algo == "simple") {
-        logInfo("Запускаем simple-генератор");
+        logInfo("Запускаем simple-генератор (maxPerDay=" + std::to_string(maxPerDay) + ")");
         assignments = generateScheduleSimple(
-            examsLocal, groupsLocal, subjectsLocal, timeslotsLocal, roomsLocal
+            examsLocal,
+            groupsLocal,
+            subjectsLocal,
+            timeslotsLocal,
+            roomsLocal,
+            maxPerDay                    // ← прокидываем ограничение
         );
     } else {
-        logInfo("Запускаем graph-генератор");
+        logInfo("Запускаем graph-генератор (maxPerDay=" + std::to_string(maxPerDay) + ")");
         assignments = generateSchedule(
-            examsLocal, groupsLocal, subjectsLocal, timeslotsLocal, roomsLocal
+            examsLocal,
+            groupsLocal,
+            subjectsLocal,
+            timeslotsLocal,
+            roomsLocal,
+            maxPerDay                    // ← прокидываем ограничение
         );
     }
 
@@ -117,13 +128,13 @@ int main() {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(
             "HTTPS exam schedule server is running.\n"
-            "GET  /api/schedule?algo=simple|graph  (дефолтные данные)\n"
-            "POST /api/schedule                    (данные из config)",
+            "GET  /api/schedule?algo=simple|graph&maxPerDay=N  (дефолтные данные из data.cpp)\n"
+            "POST /api/schedule                                (данные из config, JSON от фронта)",
             "text/plain; charset=utf-8"
         );
     });
 
-    // --- GET /api/schedule — старый режим (дефолтный data.cpp) ---
+    // --- GET /api/schedule — режим с дефолтным data.cpp ---
     svr.Get("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -167,7 +178,6 @@ int main() {
     });
 
     // --- POST /api/schedule — основной режим с config из фронта ---
-        // --- POST /api/schedule — основной режим с config из фронта ---
     svr.Post("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -215,9 +225,9 @@ int main() {
             std::vector<Group> groupsLocal;
             if (cfg.contains("groups") && cfg["groups"].is_array()) {
                 for (auto& jg : cfg["groups"]) {
-                    int id   = jg.value("id", 0);
+                    int id         = jg.value("id", 0);
                     std::string name = jg.value("name", std::string("Группа"));
-                    int size  = jg.value("size", 0);
+                    int size      = jg.value("size", 0);
                     groupsLocal.push_back(Group{id, name, size});
                 }
             }
@@ -226,7 +236,7 @@ int main() {
             std::vector<Teacher> teachersLocal;
             if (cfg.contains("teachers") && cfg["teachers"].is_array()) {
                 for (auto& jt : cfg["teachers"]) {
-                    int id   = jt.value("id", 0);
+                    int id         = jt.value("id", 0);
                     std::string name = jt.value("name", std::string("Преподаватель"));
                     teachersLocal.push_back(Teacher{id, name, ""});
                 }
@@ -236,9 +246,9 @@ int main() {
             std::vector<Room> roomsLocal;
             if (cfg.contains("rooms") && cfg["rooms"].is_array()) {
                 for (auto& jr : cfg["rooms"]) {
-                    int id   = jr.value("id", 0);
+                    int id         = jr.value("id", 0);
                     std::string name = jr.value("name", std::string("Аудитория"));
-                    int cap   = jr.value("capacity", 0);
+                    int cap       = jr.value("capacity", 0);
                     roomsLocal.push_back(Room{id, name, cap});
                 }
             }
@@ -247,9 +257,9 @@ int main() {
             std::vector<Subject> subjectsLocal;
             if (cfg.contains("subjects") && cfg["subjects"].is_array()) {
                 for (auto& jsu : cfg["subjects"]) {
-                    int id   = jsu.value("id", 0);
+                    int id         = jsu.value("id", 0);
                     std::string name = jsu.value("name", std::string("Предмет"));
-                    int diff = jsu.value("difficulty", 3);
+                    int diff      = jsu.value("difficulty", 3);
                     subjectsLocal.push_back(Subject{id, name, diff});
                 }
             }
@@ -273,10 +283,10 @@ int main() {
             if (cfg.contains("timeslots") && cfg["timeslots"].is_array()) {
                 // (на будущее: если решишь хранить таймслоты в config)
                 for (auto& jt : cfg["timeslots"]) {
-                    int id   = jt.value("id", 0);
+                    int id         = jt.value("id", 0);
                     std::string date = jt.value("date", std::string("2025-01-20"));
-                    int start = jt.value("startMinutes", 9 * 60);
-                    int end   = jt.value("endMinutes", 11 * 60);
+                    int start     = jt.value("startMinutes", 9 * 60);
+                    int end       = jt.value("endMinutes", 11 * 60);
                     timeslotsLocal.push_back(Timeslot{id, date, start, end});
                 }
             } else {
@@ -372,7 +382,6 @@ int main() {
             );
         }
     });
-
 
     // CORS preflight
     svr.Options("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
