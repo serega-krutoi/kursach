@@ -9,11 +9,6 @@
 #include "generator.h"
 #include "logger.h"
 
-
-std::string sessionStart = "2025-01-20";
-std::string sessionEnd   = "2025-01-23";
-int maxExamsPerDayForGroup = 2;
-
 int main(int argc, char** argv) {
     // выбор алгоритма: по умолчанию graph, но можно передать "simple"
     std::string algorithm = "graph";

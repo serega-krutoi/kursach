@@ -80,4 +80,4 @@ std::vector<Exam> exams = {
 
 std::string sessionStart = "2025-01-20";
 std::string sessionEnd   = "2025-01-23";
-int maxExamsPerDayForGroup = 2;
+int maxExamsPerDayForGroup = 1;
