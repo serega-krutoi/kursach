@@ -30,7 +30,7 @@ function App() {
   const [config, setConfig] = useState(createEmptyConfig());
 
   // какую сущность редактируем сейчас (таб)
-  const [configTab, setConfigTab] = useState("groups"); // groups | teachers | subjects | rooms | exams
+  const [configTab, setConfigTab] = useState("groups"); // groups | teachers | subjects | rooms | exams | session
 
   // палитра для тем
   const palette =
@@ -64,15 +64,24 @@ function App() {
           emptyText: "#9ca3af",
         };
 
-  // запрос к реальному C++ серверу (пока только algo, без config)
+  // запрос к C++ серверу (пока GET по algo)
   const handleGenerate = async () => {
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      const resp = await fetch(
-        `https://localhost:8443/api/schedule?algo=${algorithm}`
-      );
+      const payload = {
+        algo: algorithm, // "graph" или "simple"
+        config,          // весь config из редактора
+      };
+
+      const resp = await fetch("https://localhost:8443/api/schedule", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
@@ -87,6 +96,8 @@ function App() {
       setLoading(false);
     }
   };
+
+
 
   // ЗАГРУЗКА JSON-ФАЙЛА (config + result)
   const handleImportJson = (event) => {
@@ -220,7 +231,7 @@ function App() {
       const newTeacher = {
         id,
         name: `Преподаватель ${id}`,
-        subjects: [], // сюда будут ID предметов
+        subjects: [], // ID предметов
       };
       return { ...prev, teachers: [...(prev.teachers || []), newTeacher] };
     });
@@ -345,7 +356,7 @@ function App() {
           key={g.id}
           style={{
             display: "grid",
-            gridTemplateColumns: "60px 1fr 180px 90px", // ← больше места числу и кнопке
+            gridTemplateColumns: "60px 1fr 180px 90px",
             gap: "6px",
             alignItems: "center",
             marginBottom: "4px",
@@ -369,7 +380,6 @@ function App() {
               color: palette.textMain,
             }}
           />
-          {/* число + подпись теперь столбиком */}
           <div
             style={{
               display: "flex",
@@ -396,7 +406,9 @@ function App() {
                 borderRadius: "6px",
                 border: `1px solid ${palette.cardBorder}`,
                 background:
-                  theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
                 color: palette.textMain,
               }}
             />
@@ -479,7 +491,6 @@ function App() {
               fontSize: "12px",
             }}
           >
-            {/* первая строка: id + имя + удалить */}
             <div
               style={{
                 display: "grid",
@@ -531,7 +542,6 @@ function App() {
               </button>
             </div>
 
-            {/* вторая строка: предметы */}
             <div
               style={{
                 marginLeft: "60px",
@@ -780,391 +790,487 @@ function App() {
     </div>
   );
 
-            const renderRoomsEditor = () => (
-              <div style={{ marginTop: "8px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: "6px",
-                    alignItems: "center",
-                  }}
-                >
-                  <span style={{ fontWeight: 500 }}>Аудитории</span>
-                  <button
-                    onClick={addRoom}
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: "9999px",
-                      border: `1px solid ${palette.cardBorder}`,
-                      background: theme === "dark" ? "#020617" : "#ffffff",
-                      color: palette.textMain,
-                      fontSize: "12px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Добавить аудиторию
-                  </button>
-                </div>
-            
-                {(!config.rooms || config.rooms.length === 0) && (
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: palette.textMuted,
-                      marginBottom: "4px",
-                    }}
-                  >
-                    Пока нет аудиторий.
-                  </div>
-                )}
-            
-                {config.rooms?.map((r) => (
-                  <div
-                    key={r.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "60px 1fr 180px 90px", // шире колонка числа и кнопки
-                      gap: "6px",
-                      alignItems: "center",
-                      marginBottom: "4px",
-                      fontSize: "12px",
-                    }}
-                  >
-                    <span style={{ color: palette.textMuted }}>id: {r.id}</span>
-            
-                    <input
-                      type="text"
-                      value={r.name}
-                      onChange={(e) =>
-                        updateItemField("rooms", r.id, "name", e.target.value)
-                      }
-                      placeholder="Название аудитории"
-                      style={{
-                        padding: "4px 6px",
-                        borderRadius: "6px",
-                        border: `1px solid ${palette.cardBorder}`,
-                        background:
-                          theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
-                        color: palette.textMain,
-                      }}
-                    />
-            
-                    {/* ёмкость + подпись «мест» столбиком */}
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-start",
-                        gap: "2px",
-                      }}
-                    >
-                      <input
-                        type="number"
-                        min={1}
-                        value={r.capacity ?? 30}
-                        onChange={(e) =>
-                          updateItemField(
-                            "rooms",
-                            r.id,
-                            "capacity",
-                            parseInt(e.target.value || "30", 10)
-                          )
-                        }
-                        style={{
-                          width: "100%",
-                          padding: "4px 6px",
-                          borderRadius: "6px",
-                          border: `1px solid ${palette.cardBorder}`,
-                          background:
-                            theme === "dark"
-                              ? "rgba(15,23,42,0.8)"
-                              : "#ffffff",
-                          color: palette.textMain,
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          color: palette.textMuted,
-                        }}
-                      >
-                        мест
-                      </span>
-                    </div>
-            
-                    <button
-                      onClick={() => deleteItem("rooms", r.id)}
-                      style={{
-                        padding: "4px 6px",
-                        borderRadius: "9999px",
-                        border: "none",
-                        background: "rgba(220,38,38,0.12)",
-                        color: "#ef4444",
-                        fontSize: "11px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Удалить
-                    </button>
-                  </div>
-                ))}
-              </div>
-            );
-            
+  const renderRoomsEditor = () => (
+    <div style={{ marginTop: "8px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: "6px",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontWeight: 500 }}>Аудитории</span>
+        <button
+          onClick={addRoom}
+          style={{
+            padding: "4px 10px",
+            borderRadius: "9999px",
+            border: `1px solid ${palette.cardBorder}`,
+            background: theme === "dark" ? "#020617" : "#ffffff",
+            color: palette.textMain,
+            fontSize: "12px",
+            cursor: "pointer",
+          }}
+        >
+          Добавить аудиторию
+        </button>
+      </div>
 
-            const renderExamsEditor = () => (
-              <div style={{ marginTop: "8px" }}>
-                <div
+      {(!config.rooms || config.rooms.length === 0) && (
+        <div
+          style={{
+            fontSize: "12px",
+            color: palette.textMuted,
+            marginBottom: "4px",
+          }}
+        >
+          Пока нет аудиторий.
+        </div>
+      )}
+
+      {config.rooms?.map((r) => (
+        <div
+          key={r.id}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "60px 1fr 160px 80px",
+            gap: "6px",
+            alignItems: "center",
+            marginBottom: "4px",
+            fontSize: "12px",
+          }}
+        >
+          <span style={{ color: palette.textMuted }}>id: {r.id}</span>
+          <input
+            type="text"
+            value={r.name}
+            onChange={(e) =>
+              updateItemField("rooms", r.id, "name", e.target.value)
+            }
+            placeholder="Название аудитории"
+            style={{
+              padding: "4px 6px",
+              borderRadius: "6px",
+              border: `1px solid ${palette.cardBorder}`,
+              background:
+                theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+              color: palette.textMain,
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <input
+              type="number"
+              min={1}
+              value={r.capacity ?? 30}
+              onChange={(e) =>
+                updateItemField(
+                  "rooms",
+                  r.id,
+                  "capacity",
+                  parseInt(e.target.value || "30", 10)
+                )
+              }
+              style={{
+                padding: "4px 6px",
+                borderRadius: "6px",
+                border: `1px solid ${palette.cardBorder}`,
+                background:
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
+                color: palette.textMain,
+              }}
+            />
+            <span
+              style={{
+                fontSize: "11px",
+                color: palette.textMuted,
+              }}
+            >
+              мест
+            </span>
+          </div>
+          <button
+            onClick={() => deleteItem("rooms", r.id)}
+            style={{
+              padding: "4px 6px",
+              borderRadius: "9999px",
+              border: "none",
+              background: "rgba(220,38,38,0.12)",
+              color: "#ef4444",
+              fontSize: "11px",
+              cursor: "pointer",
+            }}
+          >
+            Удалить
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderExamsEditor = () => (
+    <div style={{ marginTop: "8px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: "6px",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontWeight: 500 }}>Экзамены</span>
+        <button
+          onClick={addExam}
+          style={{
+            padding: "4px 10px",
+            borderRadius: "9999px",
+            border: `1px solid ${palette.cardBorder}`,
+            background: theme === "dark" ? "#020617" : "#ffffff",
+            color: palette.textMain,
+            fontSize: "12px",
+            cursor: "pointer",
+          }}
+        >
+          Добавить экзамен
+        </button>
+      </div>
+
+      {(!config.exams || config.exams.length === 0) && (
+        <div
+          style={{
+            fontSize: "12px",
+            color: palette.textMuted,
+            marginBottom: "4px",
+          }}
+        >
+          Пока нет экзаменов.
+        </div>
+      )}
+
+      {config.exams?.map((e) => {
+        const subjectId = e.subjectId ?? null;
+        const allTeachers = config.teachers || [];
+
+        let filteredTeachers = allTeachers;
+        let filteredBySubject = [];
+        if (subjectId != null) {
+          filteredBySubject = allTeachers.filter((t) =>
+            (t.subjects || []).includes(subjectId)
+          );
+          if (filteredBySubject.length > 0) {
+            filteredTeachers = filteredBySubject;
+          }
+        }
+
+        const subject =
+          config.subjects?.find((s) => s.id === subjectId) || null;
+
+        const showFilterHint =
+          subjectId != null && filteredBySubject.length > 0;
+
+        return (
+          <div
+            key={e.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "60px minmax(120px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) 180px 90px",
+              gap: "6px",
+              alignItems: "center",
+              marginBottom: "4px",
+              fontSize: "12px",
+            }}
+          >
+            <span style={{ color: palette.textMuted }}>id: {e.id}</span>
+
+            {/* группа */}
+            <select
+              value={e.groupId ?? ""}
+              onChange={(ev) =>
+                updateItemField(
+                  "exams",
+                  e.id,
+                  "groupId",
+                  ev.target.value ? parseInt(ev.target.value, 10) : null
+                )
+              }
+              style={{
+                padding: "4px 6px",
+                borderRadius: "6px",
+                border: `1px solid ${palette.cardBorder}`,
+                background:
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
+                color: palette.textMain,
+              }}
+            >
+              <option value="">Группа…</option>
+              {config.groups?.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name || `Группа ${g.id}`}
+                </option>
+              ))}
+            </select>
+
+            {/* преподаватель (фильтр по предмету) */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+              }}
+            >
+              <select
+                value={e.teacherId ?? ""}
+                onChange={(ev) =>
+                  updateItemField(
+                    "exams",
+                    e.id,
+                    "teacherId",
+                    ev.target.value ? parseInt(ev.target.value, 10) : null
+                  )
+                }
+                style={{
+                  padding: "4px 6px",
+                  borderRadius: "6px",
+                  border: `1px solid ${palette.cardBorder}`,
+                  background:
+                    theme === "dark"
+                      ? "rgba(15,23,42,0.8)"
+                      : "#ffffff",
+                  color: palette.textMain,
+                }}
+              >
+                <option value="">Преподаватель…</option>
+                {filteredTeachers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name || `Преподаватель ${t.id}`}
+                  </option>
+                ))}
+              </select>
+              {showFilterHint && (
+                <span
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: "6px",
-                    alignItems: "center",
+                    fontSize: "11px",
+                    color: palette.textMuted,
                   }}
                 >
-                  <span style={{ fontWeight: 500 }}>Экзамены</span>
-                  <button
-                    onClick={addExam}
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: "9999px",
-                      border: `1px solid ${palette.cardBorder}`,
-                      background: theme === "dark" ? "#020617" : "#ffffff",
-                      color: palette.textMain,
-                      fontSize: "12px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Добавить экзамен
-                  </button>
-                </div>
-            
-                {(!config.exams || config.exams.length === 0) && (
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: palette.textMuted,
-                      marginBottom: "4px",
-                    }}
-                  >
-                    Пока нет экзаменов.
-                  </div>
-                )}
-            
-                {config.exams?.map((e) => {
-                  const subjectId = e.subjectId ?? null;
-                  const allTeachers = config.teachers || [];
-            
-                  // фильтрация преподавателей по предмету
-                  let filteredTeachers = allTeachers;
-                  let filteredBySubject = [];
-                  if (subjectId != null) {
-                    filteredBySubject = allTeachers.filter((t) =>
-                      (t.subjects || []).includes(subjectId)
-                    );
-                    if (filteredBySubject.length > 0) {
-                      filteredTeachers = filteredBySubject;
-                    }
-                  }
-            
-                  const subject =
-                    config.subjects?.find((s) => s.id === subjectId) || null;
-            
-                  const showFilterHint =
-                    subjectId != null && filteredBySubject.length > 0;
-            
-                  return (
-                    <div
-                      key={e.id}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "60px minmax(120px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) 180px 90px",
-                        gap: "6px",
-                        alignItems: "center",
-                        marginBottom: "4px",
-                        fontSize: "12px",
-                      }}
-                    >
-                      {/* id */}
-                      <span style={{ color: palette.textMuted }}>id: {e.id}</span>
-            
-                      {/* группа */}
-                      <select
-                        value={e.groupId ?? ""}
-                        onChange={(ev) =>
-                          updateItemField(
-                            "exams",
-                            e.id,
-                            "groupId",
-                            ev.target.value ? parseInt(ev.target.value, 10) : null
-                          )
-                        }
-                        style={{
-                          padding: "4px 6px",
-                          borderRadius: "6px",
-                          border: `1px solid ${palette.cardBorder}`,
-                          background:
-                            theme === "dark"
-                              ? "rgba(15,23,42,0.8)"
-                              : "#ffffff",
-                          color: palette.textMain,
-                        }}
-                      >
-                        <option value="">— группа —</option>
-                        {config.groups?.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.name || `Группа ${g.id}`}
-                          </option>
-                        ))}
-                      </select>
-            
-                      {/* преподаватель (фильтруем по предмету) */}
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "2px",
-                        }}
-                      >
-                        <select
-                          value={e.teacherId ?? ""}
-                          onChange={(ev) =>
-                            updateItemField(
-                              "exams",
-                              e.id,
-                              "teacherId",
-                              ev.target.value ? parseInt(ev.target.value, 10) : null
-                            )
-                          }
-                          style={{
-                            padding: "4px 6px",
-                            borderRadius: "6px",
-                            border: `1px solid ${palette.cardBorder}`,
-                            background:
-                              theme === "dark"
-                                ? "rgba(15,23,42,0.8)"
-                                : "#ffffff",
-                            color: palette.textMain,
-                          }}
-                        >
-                          <option value="">— преподаватель —</option>
-                          {filteredTeachers.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name || `Преподаватель ${t.id}`}
-                            </option>
-                          ))}
-                        </select>
-            
-                        {showFilterHint && subject && (
-                          <span
-                            style={{
-                              fontSize: "10px",
-                              color: palette.textMuted,
-                            }}
-                          >
-                            Показаны только преподы, ведущие «{subject.name}»
-                          </span>
-                        )}
-                      </div>
-            
-                      {/* предмет */}
-                      <select
-                        value={e.subjectId ?? ""}
-                        onChange={(ev) =>
-                          updateItemField(
-                            "exams",
-                            e.id,
-                            "subjectId",
-                            ev.target.value ? parseInt(ev.target.value, 10) : null
-                          )
-                        }
-                        style={{
-                          padding: "4px 6px",
-                          borderRadius: "6px",
-                          border: `1px solid ${palette.cardBorder}`,
-                          background:
-                            theme === "dark"
-                              ? "rgba(15,23,42,0.8)"
-                              : "#ffffff",
-                          color: palette.textMain,
-                        }}
-                      >
-                        <option value="">— предмет —</option>
-                        {config.subjects?.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name || `Предмет ${s.id}`}
-                          </option>
-                        ))}
-                      </select>
-            
-                      {/* длительность */}
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "flex-start",
-                          gap: "2px",
-                        }}
-                      >
-                        <input
-                          type="number"
-                          min={30}
-                          step={30}
-                          value={e.durationMinutes ?? 120}
-                          onChange={(ev) =>
-                            updateItemField(
-                              "exams",
-                              e.id,
-                              "durationMinutes",
-                              parseInt(ev.target.value || "120", 10)
-                            )
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "4px 6px",
-                            borderRadius: "6px",
-                            border: `1px solid ${palette.cardBorder}`,
-                            background:
-                              theme === "dark"
-                                ? "rgba(15,23,42,0.8)"
-                                : "#ffffff",
-                            color: palette.textMain,
-                          }}
-                          title="Длительность экзамена в минутах"
-                        />
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: palette.textMuted,
-                          }}
-                        >
-                          минут
-                        </span>
-                      </div>
-            
-                      {/* удалить */}
-                      <button
-                        onClick={() => deleteItem("exams", e.id)}
-                        style={{
-                          padding: "4px 6px",
-                          borderRadius: "9999px",
-                          border: "none",
-                          background: "rgba(220,38,38,0.12)",
-                          color: "#ef4444",
-                          fontSize: "11px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-            
+                  Показаны только преподы, ведущие «
+                  {subject?.name || `Предмет ${subjectId}`}
+                  »
+                </span>
+              )}
+            </div>
+
+            {/* предмет */}
+            <select
+              value={e.subjectId ?? ""}
+              onChange={(ev) =>
+                updateItemField(
+                  "exams",
+                  e.id,
+                  "subjectId",
+                  ev.target.value ? parseInt(ev.target.value, 10) : null
+                )
+              }
+              style={{
+                padding: "4px 6px",
+                borderRadius: "6px",
+                border: `1px solid ${palette.cardBorder}`,
+                background:
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
+                color: palette.textMain,
+              }}
+            >
+              <option value="">Предмет…</option>
+              {config.subjects?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name || `Предмет ${s.id}`}
+                </option>
+              ))}
+            </select>
+
+            {/* длительность */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: "2px",
+              }}
+            >
+              <input
+                type="number"
+                min={30}
+                step={30}
+                value={e.durationMinutes ?? 120}
+                onChange={(ev) =>
+                  updateItemField(
+                    "exams",
+                    e.id,
+                    "durationMinutes",
+                    parseInt(ev.target.value || "120", 10)
+                  )
+                }
+                style={{
+                  width: "100%",
+                  padding: "4px 6px",
+                  borderRadius: "6px",
+                  border: `1px solid ${palette.cardBorder}`,
+                  background:
+                    theme === "dark"
+                      ? "rgba(15,23,42,0.8)"
+                      : "#ffffff",
+                  color: palette.textMain,
+                }}
+                title="Длительность экзамена в минутах"
+              />
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: palette.textMuted,
+                }}
+              >
+                минут
+              </span>
+            </div>
+
+            <button
+              onClick={() => deleteItem("exams", e.id)}
+              style={{
+                padding: "4px 6px",
+                borderRadius: "9999px",
+                border: "none",
+                background: "rgba(220,38,38,0.12)",
+                color: "#ef4444",
+                fontSize: "11px",
+                cursor: "pointer",
+              }}
+            >
+              Удалить
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // --- редактор параметров сессии ---
+  const renderSessionEditor = () => (
+    <div style={{ marginTop: "8px", fontSize: "12px" }}>
+      <div style={{ marginBottom: "10px", fontWeight: 500 }}>
+        Параметры сессии
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "160px 1fr",
+          gap: "8px",
+          alignItems: "center",
+          marginBottom: "6px",
+        }}
+      >
+        <span style={{ color: palette.textMuted }}>Дата начала</span>
+        <input
+          type="date"
+          value={config.session.start}
+          onChange={(e) =>
+            setConfig((prev) => ({
+              ...prev,
+              session: { ...prev.session, start: e.target.value },
+            }))
+          }
+          style={{
+            padding: "4px 6px",
+            borderRadius: "6px",
+            border: `1px solid ${palette.cardBorder}`,
+            background: theme === "dark" ? "#020617" : "#ffffff",
+            color: palette.textMain,
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "160px 1fr",
+          gap: "8px",
+          alignItems: "center",
+          marginBottom: "6px",
+        }}
+      >
+        <span style={{ color: palette.textMuted }}>Дата окончания</span>
+        <input
+          type="date"
+          value={config.session.end}
+          onChange={(e) =>
+            setConfig((prev) => ({
+              ...prev,
+              session: { ...prev.session, end: e.target.value },
+            }))
+          }
+          style={{
+            padding: "4px 6px",
+            borderRadius: "6px",
+            border: `1px solid ${palette.cardBorder}`,
+            background: theme === "dark" ? "#020617" : "#ffffff",
+            color: palette.textMain,
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "160px 1fr",
+          gap: "8px",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ color: palette.textMuted }}>
+          Максимум экзаменов в день
+        </span>
+        <input
+          type="number"
+          min={1}
+          max={10}
+          value={config.session.maxExamsPerDayForGroup}
+          onChange={(e) =>
+            setConfig((prev) => ({
+              ...prev,
+              session: {
+                ...prev.session,
+                maxExamsPerDayForGroup: parseInt(
+                  e.target.value || "1",
+                  10
+                ),
+              },
+            }))
+          }
+          style={{
+            width: "80px",
+            padding: "4px 6px",
+            borderRadius: "6px",
+            border: `1px solid ${palette.cardBorder}`,
+            background: theme === "dark" ? "#020617" : "#ffffff",
+            color: palette.textMain,
+          }}
+        />
+      </div>
+    </div>
+  );
 
   const renderConfigEditorTab = () => {
     if (configTab === "groups") return renderGroupsEditor();
@@ -1172,6 +1278,7 @@ function App() {
     if (configTab === "subjects") return renderSubjectsEditor();
     if (configTab === "rooms") return renderRoomsEditor();
     if (configTab === "exams") return renderExamsEditor();
+    if (configTab === "session") return renderSessionEditor();
     return null;
   };
 
@@ -1206,7 +1313,7 @@ function App() {
           style={{
             marginBottom: "20px",
             display: "flex",
-            justifyContent: "space-between",
+            justifyContent: "space между",
             gap: "16px",
             alignItems: "center",
             flexWrap: "wrap",
@@ -1241,7 +1348,6 @@ function App() {
               flexWrap: "wrap",
             }}
           >
-            {/* переключатель темы */}
             <button
               onClick={() =>
                 setTheme(theme === "dark" ? "light" : "dark")
@@ -1321,7 +1427,6 @@ function App() {
             Исходные данные (config) и JSON-файл
           </div>
 
-          {/* Верхняя панель JSON-кнопок */}
           <div
             style={{
               display: "flex",
@@ -1418,6 +1523,7 @@ function App() {
               { id: "subjects", label: "Предметы" },
               { id: "rooms", label: "Аудитории" },
               { id: "exams", label: "Экзамены" },
+              { id: "session", label: "Сессия" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -1502,7 +1608,6 @@ function App() {
           </div>
         </section>
 
-        {/* Загрузка / ошибки при запросе к серверу */}
         {loading && (
           <div
             style={{
