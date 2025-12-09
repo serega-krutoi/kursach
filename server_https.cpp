@@ -5,7 +5,10 @@
 
 #include <string>
 #include <vector>
+#include <pqxx/pqxx>
 #include <cstdio>
+
+#include "auth.h"
 
 #include "model.h"
 #include "generator.h"
@@ -13,6 +16,7 @@
 #include "validator.h"
 #include "api_dto.h"
 #include "logger.h"
+#include "db.h"
 
 using nlohmann::json;
 
@@ -101,250 +105,101 @@ static std::string makeJsonResponse(
 }
 
 int main() {
-    logInfo("=== Запуск HTTPS сервера на 0.0.0.0:8443 ===");
+    logInfo("=== Запуск HTTPS сервера на 127.0.0.1:8443 ===");
 
-    httplib::SSLServer svr("server-cert.pem", "server-key.pem");
+    try {
+        // 1. Читаем конфиг БД из переменных окружения
+        db::DbConfig dbCfg = db::DbConfig::fromEnv();
+        db::ConnectionFactory dbFactory{dbCfg};
+        db::UserRepository userRepo{dbFactory};
 
-    if (!svr.is_valid()) {
-        logError("SSLServer невалиден. Проверь server-cert.pem и server-key.pem");
-        return 1;
-    }
+        logInfo("Успешно инициализирована конфигурация БД");
 
-    // Простой корень
-    svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_content(
-            "HTTPS exam schedule server is running.\n"
-            "GET  /api/schedule?maxPerDay=N  (дефолтные данные из data.cpp)\n"
-            "POST /api/schedule              (данные из config, JSON от фронта)",
-            "text/plain; charset=utf-8"
-        );
-    });    
+        httplib::SSLServer svr("server-cert.pem", "server-key.pem");
 
-    // --- GET /api/schedule — режим с дефолтным data.cpp ---
-    // --- GET /api/schedule — режим с дефолтным data.cpp ---
-    svr.Get("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-
-        int maxPerDay = maxExamsPerDayForGroup;
-        if (req.has_param("maxPerDay")) {
-            try {
-                maxPerDay = std::stoi(req.get_param_value("maxPerDay"));
-            } catch (...) {
-                // оставляем дефолт
-            }
+        if (!svr.is_valid()) {
+            logError("SSLServer невалиден. Проверь server-cert.pem и server-key.pem");
+            return 1;
         }
 
-        logInfo("GET /api/schedule (data.cpp) maxPerDay=" + std::to_string(maxPerDay));
+        // --- простой корень ---
+        svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
+            res.set_header("Access-Control-Allow-Origin", "*");
+            res.set_content(
+                "HTTPS exam schedule server is running.\n"
+                "GET  /api/schedule?maxPerDay=N  (дефолтные данные из data.cpp)\n"
+                "POST /api/schedule              (данные из config, JSON от фронта)\n"
+                "GET  /api/health/db              (проверка подключения к БД)",
+                "text/plain; charset=utf-8"
+            );
+        });
 
-        std::string json = makeJsonResponse(
-            groups,
-            teachers,
-            rooms,
-            subjects,
-            timeslots,
-            exams,
-            maxPerDay,
-            sessionStart,
-            sessionEnd
-        );
-
-        res.set_content(json, "application/json; charset=utf-8");
-    });
-
-    // --- POST /api/schedule — основной режим с config из фронта ---
-    svr.Post("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
+	    // --- POST /api/auth/login ---
+    svr.Post("/api/auth/login", [&](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
 
         try {
             json j = json::parse(req.body);
 
-            if (!j.contains("config") || !j["config"].is_object()) {
+            std::string username = j.value("username", "");
+            std::string password = j.value("password", "");
+
+            if (username.empty() || password.empty()) {
                 res.status = 400;
                 res.set_content(
-                    R"({"error":"missing config object"})",
+                    R"({"error":"missing username or password"})",
                     "application/json; charset=utf-8"
                 );
                 return;
             }
 
-            json cfg = j["config"];
-
-            // --- session ---
-            std::string sessionStartLocal = sessionStart;
-            std::string sessionEndLocal   = sessionEnd;
-            int maxPerDay                 = maxExamsPerDayForGroup;
-
-            if (cfg.contains("session") && cfg["session"].is_object()) {
-                auto js = cfg["session"];
-                if (js.contains("start") && js["start"].is_string())
-                    sessionStartLocal = js["start"].get<std::string>();
-                if (js.contains("end") && js["end"].is_string())
-                    sessionEndLocal = js["end"].get<std::string>();
-                if (js.contains("maxExamsPerDayForGroup") &&
-                    js["maxExamsPerDayForGroup"].is_number_integer())
-                    maxPerDay = js["maxExamsPerDayForGroup"].get<int>();
-            }
-
-            // --- groups ---
-            std::vector<Group> groupsLocal;
-            if (cfg.contains("groups") && cfg["groups"].is_array()) {
-                for (auto& jg : cfg["groups"]) {
-                    int id         = jg.value("id", 0);
-                    std::string name = jg.value("name", std::string("Группа"));
-                    int size      = jg.value("size", 0);
-                    groupsLocal.push_back(Group{id, name, size});
-                }
-            }
-
-            // --- teachers ---
-            std::vector<Teacher> teachersLocal;
-            if (cfg.contains("teachers") && cfg["teachers"].is_array()) {
-                for (auto& jt : cfg["teachers"]) {
-                    int id         = jt.value("id", 0);
-                    std::string name = jt.value("name", std::string("Преподаватель"));
-                    teachersLocal.push_back(Teacher{id, name, ""});
-                }
-            }
-
-            // --- rooms ---
-            std::vector<Room> roomsLocal;
-            if (cfg.contains("rooms") && cfg["rooms"].is_array()) {
-                for (auto& jr : cfg["rooms"]) {
-                    int id         = jr.value("id", 0);
-                    std::string name = jr.value("name", std::string("Аудитория"));
-                    int cap       = jr.value("capacity", 0);
-                    roomsLocal.push_back(Room{id, name, cap});
-                }
-            }
-
-            // --- subjects ---
-            std::vector<Subject> subjectsLocal;
-            if (cfg.contains("subjects") && cfg["subjects"].is_array()) {
-                for (auto& jsu : cfg["subjects"]) {
-                    int id         = jsu.value("id", 0);
-                    std::string name = jsu.value("name", std::string("Предмет"));
-                    int diff      = jsu.value("difficulty", 3);
-                    subjectsLocal.push_back(Subject{id, name, diff});
-                }
-            }
-
-            // --- exams ---
-            std::vector<Exam> examsLocal;
-            if (cfg.contains("exams") && cfg["exams"].is_array()) {
-                for (auto& je : cfg["exams"]) {
-                    int id        = je.value("id", 0);
-                    int groupId   = je.value("groupId", 0);
-                    int teacherId = je.value("teacherId", 0);
-                    int subjectId = je.value("subjectId", 0);
-                    int duration  = je.value("durationMinutes", 120);
-                    examsLocal.push_back(Exam{id, groupId, teacherId, subjectId, duration});
-                }
-            }
-
-            // --- timeslots: если в config нет timeslots, создаём дефолтные ---
-            std::vector<Timeslot> timeslotsLocal;
-
-            if (cfg.contains("timeslots") && cfg["timeslots"].is_array()) {
-                // (на будущее: если решишь хранить таймслоты в config)
-                for (auto& jt : cfg["timeslots"]) {
-                    int id         = jt.value("id", 0);
-                    std::string date = jt.value("date", std::string("2025-01-20"));
-                    int start     = jt.value("startMinutes", 9 * 60);
-                    int end       = jt.value("endMinutes", 11 * 60);
-                    timeslotsLocal.push_back(Timeslot{id, date, start, end});
-                }
-            } else {
-                // Автоматически генерим 4 дня сессии по 2 слота (09–11, 12–14)
-                // на основе sessionStartLocal (формат "YYYY-MM-DD")
-                std::string base = sessionStartLocal;
-                if (base.size() < 10) {
-                    base = "2025-01-20";
-                }
-
-                int day = 1;
-                try {
-                    if (base.size() >= 10) {
-                        day = std::stoi(base.substr(8, 2));
-                    }
-                } catch (...) {
-                    day = 20;
-                    base = "2025-01-20";
-                }
-
-                int nextId = 1;
-                for (int i = 0; i < 4; ++i) {
-                    std::string d = base;
-                    if (d.size() >= 10) {
-                        int dd = day + i;
-                        char buf[3];
-                        std::snprintf(buf, sizeof(buf), "%02d", dd);
-                        d[8] = buf[0];
-                        d[9] = buf[1];
-                    }
-                    // слот 1: 09:00–11:00
-                    timeslotsLocal.push_back(Timeslot{
-                        nextId++,
-                        d,
-                        9 * 60,
-                        11 * 60
-                    });
-                    // слот 2: 12:00–14:00
-                    timeslotsLocal.push_back(Timeslot{
-                        nextId++,
-                        d,
-                        12 * 60,
-                        14 * 60
-                    });
-                }
-            }
-
-            logInfo(
-                "POST /api/schedule "
-                "groups="   + std::to_string(groupsLocal.size()) +
-                " teachers=" + std::to_string(teachersLocal.size()) +
-                " rooms="    + std::to_string(roomsLocal.size()) +
-                " subjects=" + std::to_string(subjectsLocal.size()) +
-                " exams="    + std::to_string(examsLocal.size()) +
-                " timeslots=" + std::to_string(timeslotsLocal.size()) +
-                " maxPerDay=" + std::to_string(maxPerDay)
-            );
-
-            if (groupsLocal.empty() || examsLocal.empty()) {
-                res.status = 400;
+            auto userOpt = userRepo.findUserByUsername(username);
+            if (!userOpt.has_value()) {
+                logInfo("Login failed: user not found: " + username);
+                res.status = 401;
                 res.set_content(
-                    R"({"error":"config must contain non-empty groups and exams"})",
+                    R"({"error":"invalid credentials"})",
                     "application/json; charset=utf-8"
                 );
                 return;
             }
 
-            std::string jsonResp = makeJsonResponse(
-                groupsLocal,
-                teachersLocal,
-                roomsLocal,
-                subjectsLocal,
-                timeslotsLocal,
-                examsLocal,
-                maxPerDay,
-                sessionStartLocal,
-                sessionEndLocal
-            );
+            db::DbUser user = *userOpt;
 
-            res.set_content(jsonResp, "application/json; charset=utf-8");
+            if (!verifyPassword(password, user.passwordHash)) {
+                logInfo("Login failed: wrong password for user: " + username);
+                res.status = 401;
+                res.set_content(
+                    R"({"error":"invalid credentials"})",
+                    "application/json; charset=utf-8"
+                );
+                return;
+            }
+
+            logInfo("Login success for user: " + username + " (role=" + user.role + ")");
+
+            json resp = {
+                {"ok", true},
+                {"user", {
+                    {"id", user.id},
+                    {"username", user.username},
+                    {"role", user.role}
+                }}
+            };
+
+            res.status = 200;
+            res.set_content(resp.dump(), "application/json; charset=utf-8");
         } catch (const std::exception& ex) {
-            logError(std::string("Ошибка парсинга/обработки POST /api/schedule: ") + ex.what());
+            logError(std::string("Error in /api/auth/login: ") + ex.what());
             res.status = 400;
             res.set_content(
-                R"({"error":"invalid JSON or config"})",
+                R"({"error":"invalid json"})",
                 "application/json; charset=utf-8"
             );
         } catch (...) {
-            logError("Неизвестная ошибка в POST /api/schedule");
+            logError("Unknown error in /api/auth/login");
             res.status = 500;
             res.set_content(
                 R"({"error":"internal server error"})",
@@ -353,17 +208,70 @@ int main() {
         }
     });
 
-    // CORS preflight
-    svr.Options("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
+    // CORS preflight для /api/auth/login
+    svr.Options("/api/auth/login", [](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
         res.status = 204;
     });
 
-    bool ok = svr.listen("127.0.0.1", 8443);
-    if (!ok) {
-        logError("Не удалось запустить HTTPS сервер на порту 8443");
+
+        // --- health-check БД ---
+        svr.Get("/api/health/db", [&](const httplib::Request& req, httplib::Response& res) {
+            res.set_header("Access-Control-Allow-Origin", "*");
+            res.set_header("Content-Type", "application/json; charset=utf-8");
+
+            try {
+                auto conn = dbFactory.createConnection();
+                pqxx::work tx{*conn};
+                auto r = tx.exec("SELECT 1");
+                tx.commit();
+
+                if (r.empty()) {
+                    res.status = 500;
+                    res.set_content(R"({"db":"no rows from SELECT 1"})", "application/json; charset=utf-8");
+                } else {
+                    res.status = 200;
+                    res.set_content(R"({"db":"ok"})", "application/json; charset=utf-8");
+                }
+            } catch (const std::exception& ex) {
+                logError(std::string("DB health check error: ") + ex.what());
+                res.status = 500;
+                res.set_content(
+                    std::string(R"({"db":"error","message":")") + ex.what() + "\"}",
+                    "application/json; charset=utf-8"
+                );
+            }
+        });
+
+        // --- твои уже существующие обработчики /api/schedule ---
+        svr.Get("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
+            // ... ТВОЙ КОД БЕЗ ИЗМЕНЕНИЙ ...
+        });
+
+        svr.Post("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
+            // ... ТВОЙ КОД БЕЗ ИЗМЕНЕНИЙ ...
+        });
+
+        svr.Options("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
+            res.set_header("Access-Control-Allow-Origin", "*");
+            res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            res.set_header("Access-Control-Allow-Headers", "Content-Type");
+            res.status = 204;
+        });
+
+        bool ok = svr.listen("127.0.0.1", 8443);
+        if (!ok) {
+            logError("Не удалось запустить HTTPS сервер на порту 8443");
+            return 1;
+        }
+
+    } catch (const std::exception& ex) {
+        logError(std::string("Fatal error on startup: ") + ex.what());
+        return 1;
+    } catch (...) {
+        logError("Unknown fatal error on startup");
         return 1;
     }
 
