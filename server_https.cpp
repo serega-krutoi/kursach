@@ -1,4 +1,3 @@
-// server_https.cpp
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.h"
 #include "json.hpp"
@@ -7,8 +6,12 @@
 #include <vector>
 #include <pqxx/pqxx>
 #include <cstdio>
+#include <optional>
 
+#include <cstdlib> 
+#include "jwt_utils.h"
 #include "auth.h"
+#include "db.h"
 
 #include "model.h"
 #include "generator.h"
@@ -16,7 +19,6 @@
 #include "validator.h"
 #include "api_dto.h"
 #include "logger.h"
-#include "db.h"
 
 using nlohmann::json;
 
@@ -104,10 +106,83 @@ static std::string makeJsonResponse(
     return buildApiResponseJsonString(resp);
 }
 
+static std::string trim(const std::string& s) {
+    size_t start = 0;
+    while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) ++start;
+    size_t end = s.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    return s.substr(start, end - start);
+}
+
+static std::optional<std::string> getTokenFromCookie(const std::string& cookieHeader) {
+    // Cookie: key1=val1; auth_token=...; other=...
+    size_t pos = 0;
+    while (pos < cookieHeader.size()) {
+        size_t sep = cookieHeader.find(';', pos);
+        std::string part = (sep == std::string::npos)
+            ? cookieHeader.substr(pos)
+            : cookieHeader.substr(pos, sep - pos);
+
+        part = trim(part);
+        const std::string prefix = "auth_token=";
+        if (part.rfind(prefix, 0) == 0) { // начинается с auth_token=
+            return part.substr(prefix.size());
+        }
+
+        if (sep == std::string::npos) break;
+        pos = sep + 1;
+    }
+    return std::nullopt;
+}
+
+static std::optional<std::string> getTokenFromAuthorization(const std::string& authHeader) {
+    // Authorization: Bearer <token>
+    const std::string bearer = "Bearer ";
+    if (authHeader.rfind(bearer, 0) == 0) {
+        return authHeader.substr(bearer.size());
+    }
+    return std::nullopt;
+}
+
+// Возвращает JwtPayload, если токен валиден (из Cookie или Authorization), иначе nullopt
+static std::optional<JwtPayload> getUserFromRequest(
+    const httplib::Request& req,
+    const std::string& jwtSecret
+) {
+    std::optional<std::string> token;
+
+    // 1) Пытаемся взять из Authorization
+    auto itAuth = req.headers.find("Authorization");
+    if (itAuth != req.headers.end()) {
+        token = getTokenFromAuthorization(itAuth->second);
+    }
+
+    // 2) Если не нашли, пытаемся взять из Cookie
+    if (!token.has_value()) {
+        auto itCookie = req.headers.find("Cookie");
+        if (itCookie != req.headers.end()) {
+            token = getTokenFromCookie(itCookie->second);
+        }
+    }
+
+    if (!token.has_value()) {
+        return std::nullopt;
+    }
+
+    return verifyJwt(*token, jwtSecret);
+}
+
 int main() {
     logInfo("=== Запуск HTTPS сервера на 127.0.0.1:8443 ===");
 
     try {
+
+	const char* jwtSecretEnv = std::getenv("KURSACH_JWT_SECRET");
+        if (!jwtSecretEnv) {
+            throw std::runtime_error("Environment variable KURSACH_JWT_SECRET is not set");
+        }
+        std::string jwtSecret(jwtSecretEnv);
+
         // 1. Читаем конфиг БД из переменных окружения
         db::DbConfig dbCfg = db::DbConfig::fromEnv();
         db::ConnectionFactory dbFactory{dbCfg};
@@ -134,10 +209,46 @@ int main() {
             );
         });
 
-	    // --- POST /api/auth/login ---
-    svr.Post("/api/auth/login", [&](const httplib::Request& req, httplib::Response& res) {
+	svr.Get("/api/auth/me", [&](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+        auto payloadOpt = getUserFromRequest(req, jwtSecret);
+        if (!payloadOpt.has_value()) {
+            res.status = 401;
+            res.set_content(
+                R"({"error":"unauthorized"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        const auto& p = *payloadOpt;
+
+        json resp = {
+            {"ok", true},
+            {"user", {
+                {"id", p.userId},
+                {"role", p.role}
+            }}
+        };
+
+        res.status = 200;
+        res.set_content(resp.dump(), "application/json; charset=utf-8");
+    });
+
+    svr.Options("/api/auth/me", [](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.status = 204;
+    });
+
+
+	    svr.Post("/api/auth/login", [&](const httplib::Request& req, httplib::Response& res) {
+ 		 res.set_header("Access-Control-Allow-Origin", "*"); // или твой домен
+	        res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
 
         try {
@@ -180,13 +291,23 @@ int main() {
 
             logInfo("Login success for user: " + username + " (role=" + user.role + ")");
 
+            // создаём JWT на 24 часа
+            std::string token = createJwt(user.id, user.role, jwtSecret, 24 * 3600);
+
+            // кладём токен в httpOnly cookie
+            std::string cookie =
+                "auth_token=" + token +
+                "; HttpOnly; Secure; Path=/; SameSite=Lax";
+            res.set_header("Set-Cookie", cookie);
+
             json resp = {
                 {"ok", true},
                 {"user", {
                     {"id", user.id},
                     {"username", user.username},
                     {"role", user.role}
-                }}
+                }},
+                {"token", token} // бонусом, если захочешь использовать в JS
             };
 
             res.status = 200;
@@ -208,14 +329,13 @@ int main() {
         }
     });
 
-    // CORS preflight для /api/auth/login
     svr.Options("/api/auth/login", [](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
         res.status = 204;
     });
-
+	
 
         // --- health-check БД ---
         svr.Get("/api/health/db", [&](const httplib::Request& req, httplib::Response& res) {
