@@ -45,7 +45,6 @@ extern int maxExamsPerDayForGroup;
 // --------- хелпер: генерация JSON-ответа по данным ---------
 
 static std::string makeJsonResponse(
-    const std::string& algo,
     const std::vector<Group>& groupsLocal,
     const std::vector<Teacher>& teachersLocal,
     const std::vector<Room>& roomsLocal,
@@ -56,29 +55,17 @@ static std::string makeJsonResponse(
     const std::string& sessionStartLocal,
     const std::string& sessionEndLocal
 ) {
-    // 1. Генерация
-    std::vector<ExamAssignment> assignments;
-    if (algo == "simple") {
-        logInfo("Запускаем simple-генератор (maxPerDay=" + std::to_string(maxPerDay) + ")");
-        assignments = generateScheduleSimple(
-            examsLocal,
-            groupsLocal,
-            subjectsLocal,
-            timeslotsLocal,
-            roomsLocal,
-            maxPerDay                    // ← прокидываем ограничение
-        );
-    } else {
-        logInfo("Запускаем graph-генератор (maxPerDay=" + std::to_string(maxPerDay) + ")");
-        assignments = generateSchedule(
-            examsLocal,
-            groupsLocal,
-            subjectsLocal,
-            timeslotsLocal,
-            roomsLocal,
-            maxPerDay                    // ← прокидываем ограничение
-        );
-    }
+    // 1. Генерация — всегда графовый алгоритм
+    logInfo("Запускаем graph-генератор (maxPerDay=" + std::to_string(maxPerDay) + ")");
+
+    std::vector<ExamAssignment> assignments = generateSchedule(
+        examsLocal,
+        groupsLocal,
+        subjectsLocal,
+        timeslotsLocal,
+        roomsLocal,
+        maxPerDay
+    );
 
     // 2. Валидация
     ScheduleValidator validator;
@@ -96,7 +83,7 @@ static std::string makeJsonResponse(
 
     // 3. DTO для фронта
     ApiResponse resp;
-    resp.algorithm = algo;
+    resp.algorithm = "graph"; // зашиваем, что алгоритм графовый
     resp.schedule  = buildExamViews(
         examsLocal,
         groupsLocal,
@@ -128,25 +115,18 @@ int main() {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(
             "HTTPS exam schedule server is running.\n"
-            "GET  /api/schedule?algo=simple|graph&maxPerDay=N  (дефолтные данные из data.cpp)\n"
-            "POST /api/schedule                                (данные из config, JSON от фронта)",
+            "GET  /api/schedule?maxPerDay=N  (дефолтные данные из data.cpp)\n"
+            "POST /api/schedule              (данные из config, JSON от фронта)",
             "text/plain; charset=utf-8"
         );
-    });
+    });    
 
+    // --- GET /api/schedule — режим с дефолтным data.cpp ---
     // --- GET /api/schedule — режим с дефолтным data.cpp ---
     svr.Get("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
-
-        std::string algo = "graph";
-        if (req.has_param("algo")) {
-            auto v = req.get_param_value("algo");
-            if (v == "simple" || v == "graph") {
-                algo = v;
-            }
-        }
 
         int maxPerDay = maxExamsPerDayForGroup;
         if (req.has_param("maxPerDay")) {
@@ -157,12 +137,9 @@ int main() {
             }
         }
 
-        logInfo("GET /api/schedule algo=" + algo +
-                " maxPerDay=" + std::to_string(maxPerDay) +
-                " (используются данные из data.cpp)");
+        logInfo("GET /api/schedule (data.cpp) maxPerDay=" + std::to_string(maxPerDay));
 
         std::string json = makeJsonResponse(
-            algo,
             groups,
             teachers,
             rooms,
@@ -185,14 +162,6 @@ int main() {
 
         try {
             json j = json::parse(req.body);
-
-            std::string algo = "graph";
-            if (j.contains("algo") && j["algo"].is_string()) {
-                std::string v = j["algo"].get<std::string>();
-                if (v == "simple" || v == "graph") {
-                    algo = v;
-                }
-            }
 
             if (!j.contains("config") || !j["config"].is_object()) {
                 res.status = 400;
@@ -334,14 +303,16 @@ int main() {
                 }
             }
 
-            logInfo("POST /api/schedule algo=" + algo +
-                    " groups=" + std::to_string(groupsLocal.size()) +
-                    " teachers=" + std::to_string(teachersLocal.size()) +
-                    " rooms=" + std::to_string(roomsLocal.size()) +
-                    " subjects=" + std::to_string(subjectsLocal.size()) +
-                    " exams=" + std::to_string(examsLocal.size()) +
-                    " timeslots=" + std::to_string(timeslotsLocal.size()) +
-                    " maxPerDay=" + std::to_string(maxPerDay));
+            logInfo(
+                "POST /api/schedule "
+                "groups="   + std::to_string(groupsLocal.size()) +
+                " teachers=" + std::to_string(teachersLocal.size()) +
+                " rooms="    + std::to_string(roomsLocal.size()) +
+                " subjects=" + std::to_string(subjectsLocal.size()) +
+                " exams="    + std::to_string(examsLocal.size()) +
+                " timeslots=" + std::to_string(timeslotsLocal.size()) +
+                " maxPerDay=" + std::to_string(maxPerDay)
+            );
 
             if (groupsLocal.empty() || examsLocal.empty()) {
                 res.status = 400;
@@ -353,7 +324,6 @@ int main() {
             }
 
             std::string jsonResp = makeJsonResponse(
-                algo,
                 groupsLocal,
                 teachersLocal,
                 roomsLocal,

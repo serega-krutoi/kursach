@@ -1,6 +1,6 @@
 // src/App.jsx
 import { useState, useMemo } from "react";
-import { mockResponseGraph, mockResponseSimple } from "./mockData";
+import { mockResponseGraph } from "./mockData";
 
 function createEmptyConfig() {
   return {
@@ -19,9 +19,13 @@ function createEmptyConfig() {
 }
 
 function App() {
-  const [algorithm, setAlgorithm] = useState("graph"); // graph | simple
   const [data, setData] = useState(mockResponseGraph);
+
+  // фильтры для расписания
   const [selectedGroup, setSelectedGroup] = useState("all");
+  const [selectedTeacher, setSelectedTeacher] = useState("all");
+  const [selectedSubject, setSelectedSubject] = useState("all");
+
   const [theme, setTheme] = useState("dark"); // "dark" | "light"
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -71,8 +75,8 @@ function App() {
 
     try {
       const payload = {
-        algo: algorithm, // "graph" или "simple"
-        config,          // весь config из редактора
+        algo: "graph", // всегда графовый алгоритм
+        config,        // весь config из редактора
       };
 
       const resp = await fetch("https://localhost:8443/api/schedule", {
@@ -153,15 +157,43 @@ function App() {
   // список групп для фильтра (из расписания)
   const groupOptions = useMemo(() => {
     const set = new Set();
-    data.schedule.forEach((item) => set.add(item.groupName));
-    return Array.from(set);
+    data.schedule.forEach((item) => {
+      if (item.groupName) set.add(item.groupName);
+    });
+    return Array.from(set).sort();
   }, [data]);
-
-  // фильтруем расписание по выбранной группе
+  
+  const teacherOptions = useMemo(() => {
+    const set = new Set();
+    data.schedule.forEach((item) => {
+      if (item.teacherName) set.add(item.teacherName);
+    });
+    return Array.from(set).sort();
+  }, [data]);
+  
+  const subjectOptions = useMemo(() => {
+    const set = new Set();
+    data.schedule.forEach((item) => {
+      if (item.subjectName) set.add(item.subjectName);
+    });
+    return Array.from(set).sort();
+  }, [data]);
+  
+  // фильтруем расписание по группе + преподавателю + предмету
   const filteredSchedule = useMemo(() => {
-    if (selectedGroup === "all") return data.schedule;
-    return data.schedule.filter((item) => item.groupName === selectedGroup);
-  }, [data, selectedGroup]);
+    return data.schedule.filter((item) => {
+      if (selectedGroup !== "all" && item.groupName !== selectedGroup) {
+        return false;
+      }
+      if (selectedTeacher !== "all" && item.teacherName !== selectedTeacher) {
+        return false;
+      }
+      if (selectedSubject !== "all" && item.subjectName !== selectedSubject) {
+        return false;
+      }
+      return true;
+    });
+  }, [data, selectedGroup, selectedTeacher, selectedSubject]);
 
   // стили для заголовков таблицы и ячеек
   const thStyle = {
@@ -1366,25 +1398,6 @@ function App() {
               Тема: {theme === "dark" ? "тёмная" : "светлая"}
             </button>
 
-            <select
-              value={algorithm}
-              onChange={(e) => setAlgorithm(e.target.value)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: "9999px",
-                border: "1px solid #4b5563",
-                background:
-                  theme === "dark" ? "#020617" : "#ffffff",
-                color: palette.textMain,
-                fontSize: "13px",
-              }}
-            >
-              <option value="graph">
-                Алгоритм: Graph + Heuristic
-              </option>
-              <option value="simple">Алгоритм: Simple</option>
-            </select>
-
             <button
               onClick={handleGenerate}
               style={{
@@ -1595,17 +1608,6 @@ function App() {
               ))}
             </ul>
           )}
-          <div style={{ marginTop: "6px", color: palette.textMuted }}>
-            Используемый алгоритм:{" "}
-            <span
-              style={{
-                color: palette.textMain,
-                fontWeight: 500,
-              }}
-            >
-              {data.algorithm}
-            </span>
-          </div>
         </section>
 
         {loading && (
@@ -1632,124 +1634,150 @@ function App() {
           </div>
         )}
 
-        {/* Фильтр по группе */}
-        <section
-          style={{
-            marginBottom: "12px",
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            fontSize: "13px",
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ color: palette.textMuted }}>
-            Фильтр по группе:
-          </span>
-          <select
-            value={selectedGroup}
-            onChange={(e) => setSelectedGroup(e.target.value)}
+        {/* Фильтры по расписанию */}
+          <div
             style={{
-              padding: "4px 10px",
-              borderRadius: "9999px",
-              border: "1px solid #4b5563",
-              background:
-                theme === "dark" ? "#020617" : "#ffffff",
-              color: palette.textMain,
-              fontSize: "13px",
+              marginTop: "16px",
+              marginBottom: "12px",
+              display: "flex",
+              gap: "8px",
+              flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
-            <option value="all">Все группы</option>
-            {groupOptions.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-        </section>
+            <span style={{ fontSize: "13px", color: palette.textMuted }}>Фильтры:</span>
 
-        {/* Таблица расписания */}
-        <section
-          style={{
-            borderRadius: "12px",
-            border: `1px solid ${palette.cardBorder}`,
-            overflowX: "auto",
-          }}
-        >
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "13px",
-              minWidth: "640px",
-            }}
-          >
-            <thead
+            {/* Фильтр по группе */}
+            <select
+              value={selectedGroup}
+              onChange={(e) => setSelectedGroup(e.target.value)}
               style={{
-                background: palette.headerGradient,
+                padding: "4px 10px",
+                borderRadius: "9999px",
+                border: "1px solid #4b5563",
+                background: theme === "dark" ? "#020617" : "#ffffff",
+                color: palette.textMain,
+                fontSize: "13px",
               }}
             >
-              <tr>
-                <th style={thStyle}>Дата</th>
-                <th style={thStyle}>Время</th>
-                <th style={thStyle}>Группа</th>
-                <th style={thStyle}>Предмет</th>
-                <th style={thStyle}>Преподаватель</th>
-                <th style={thStyle}>Аудитория</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSchedule.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    style={{
-                      padding: "16px",
-                      textAlign: "center",
-                      color: palette.emptyText,
-                    }}
-                  >
-                    Нет записей для выбранного фильтра
-                  </td>
-                </tr>
-              ) : (
-                filteredSchedule.map((item, index) => {
-                  const isEven = index % 2 === 0;
-                  const rowBaseColor = isEven
-                    ? palette.rowBg
-                    : palette.rowAltBg;
+              <option value="all">Все группы</option>
+              {groupOptions.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
 
-                  return (
-                    <tr
-                      key={item.examId}
-                      style={{
-                        ...baseRowStyle,
-                        backgroundColor: rowBaseColor,
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.backgroundColor =
-                          palette.rowHoverBg)
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.backgroundColor =
-                          rowBaseColor)
-                      }
-                    >
-                      <td style={tdStyle}>{item.date}</td>
-                      <td style={tdStyle}>
-                        {item.startTime}–{item.endTime}
-                      </td>
-                      <td style={tdStyle}>{item.groupName}</td>
-                      <td style={tdStyle}>{item.subjectName}</td>
-                      <td style={tdStyle}>{item.teacherName}</td>
-                      <td style={tdStyle}>{item.roomName}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </section>
+            {/* Фильтр по преподавателю */}
+            <select
+              value={selectedTeacher}
+              onChange={(e) => setSelectedTeacher(e.target.value)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "9999px",
+                border: "1px solid #4b5563",
+                background: theme === "dark" ? "#020617" : "#ffffff",
+                color: palette.textMain,
+                fontSize: "13px",
+              }}
+            >
+              <option value="all">Все преподаватели</option>
+              {teacherOptions.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+
+            {/* Фильтр по предмету */}
+            <select
+              value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "9999px",
+                border: "1px solid #4b5563",
+                background: theme === "dark" ? "#020617" : "#ffffff",
+                color: palette.textMain,
+                fontSize: "13px",
+              }}
+            >
+              <option value="all">Все предметы</option>
+              {subjectOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Таблица расписания */}
+          <div
+            style={{
+              borderRadius: "12px",
+              overflow: "hidden",
+              border: `1px solid ${palette.tableBorder}`,
+              marginTop: "8px",
+            }}
+          >
+            {filteredSchedule.length === 0 ? (
+              <div
+                style={{
+                  padding: "12px 14px",
+                  color: palette.emptyText,
+                  fontSize: "13px",
+                }}
+              >
+                Нет записей для выбранных фильтров
+              </div>
+            ) : (
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "13px",
+                }}
+              >
+                <thead style={{ background: "#1e40af" }}>
+                  <tr>
+                    <th style={thStyle}>Дата</th>
+                    <th style={thStyle}>Время</th>
+                    <th style={thStyle}>Группа</th>
+                    <th style={thStyle}>Предмет</th>
+                    <th style={thStyle}>Преподаватель</th>
+                    <th style={thStyle}>Аудитория</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSchedule.map((item, index) => {
+                    const isEven = index % 2 === 0;
+                    const rowBaseColor = isEven ? palette.rowBg : palette.rowAltBg;
+                    return (
+                      <tr
+                        key={index}
+                        style={{ ...baseRowStyle, backgroundColor: rowBaseColor }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = palette.rowHoverBg;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = rowBaseColor;
+                        }}
+                      >
+                        <td style={tdStyle}>{item.date}</td>
+                        <td style={tdStyle}>
+                          {item.startTime}–{item.endTime}
+                        </td>
+                        <td style={tdStyle}>{item.groupName}</td>
+                        <td style={tdStyle}>{item.subjectName}</td>
+                        <td style={tdStyle}>{item.teacherName}</td>
+                        <td style={tdStyle}>{item.roomName}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
       </div>
     </div>
   );
