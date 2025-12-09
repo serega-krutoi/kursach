@@ -361,7 +361,7 @@ int main() {
         res.status = 204;
     });
 
-    bool ok = svr.listen("0.0.0.0", 8443);
+    bool ok = svr.listen("127.0.0.1", 8443);
     if (!ok) {
         logError("Не удалось запустить HTTPS сервер на порту 8443");
         return 1;

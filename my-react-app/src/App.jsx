@@ -79,7 +79,7 @@ function App() {
         config,        // весь config из редактора
       };
 
-      const resp = await fetch("https://localhost:8443/api/schedule", {
+      const resp = await fetch("/api/schedule", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
