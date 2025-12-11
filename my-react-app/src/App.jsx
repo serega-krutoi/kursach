@@ -30,12 +30,18 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  // --- авторизация ---
+  // авторизация
   const [user, setUser] = useState(null); // { id, username, role } или null
   const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState(null);
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [loginForm, setLoginForm] = useState({
+    username: "",
+    password: "",
+  });
+
+  // роли
+  const isAdmin = user?.role === "admin";
+  const isStudent = user?.role === "student";
 
   // исходные данные (config)
   const [config, setConfig] = useState(createEmptyConfig());
@@ -77,38 +83,51 @@ function App() {
 
   // --- проверка авторизации при загрузке ---
   useEffect(() => {
-    const checkAuth = async () => {
+    fetch("/api/auth/me", {
+      credentials: "include",
+    })
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data) => {
+        if (data && data.ok && data.user) {
+          setUser(data.user);
+        }
+      })
+      .catch(() => {
+        // считаем, что пользователь не залогинен
+      });
+  }, []);
+
+  // --- (опционально) загрузка опубликованного расписания ---
+  useEffect(() => {
+    const loadPublicSchedule = async () => {
       try {
-        setAuthLoading(true);
-        setAuthError(null);
-        const res = await fetch("/api/auth/me", {
-          credentials: "include",
-        });
-        if (!res.ok) {
-          setUser(null);
-          return;
-        }
+        const res = await fetch("/api/public/schedule");
+        if (!res.ok) return;
         const json = await res.json();
-        if (json.ok && json.user) {
-          setUser(json.user);
-        } else {
-          setUser(null);
-        }
+        setData(json);
       } catch (e) {
-        console.error("auth/me error", e);
-        setUser(null);
-      } finally {
-        setAuthLoading(false);
+        console.error("Cannot load public schedule", e);
+        // если не получилось — остаёмся на mockResponseGraph
       }
     };
 
-    checkAuth();
+    // раскомментируй, когда сделаешь эндпоинт
+    // loadPublicSchedule();
   }, []);
+
+  // --- обработка ввода в форме логина ---
+  const handleLoginInputChange = (e) => {
+    const { name, value } = e.target;
+    setLoginForm((prev) => ({ ...prev, [name]: value }));
+  };
 
   // --- вход ---
   const handleLogin = async (e) => {
     e.preventDefault();
-    setAuthError(null);
+    setAuthError("");
     setErrorMsg(null);
     setAuthLoading(true);
 
@@ -118,10 +137,10 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
+        credentials: "include", // важно для auth_token
         body: JSON.stringify({
-          username: loginUsername,
-          password: loginPassword,
+          username: loginForm.username,
+          password: loginForm.password,
         }),
       });
 
@@ -139,9 +158,8 @@ function App() {
       const json = await res.json();
       if (json.ok && json.user) {
         setUser(json.user);
-        setLoginUsername("");
-        setLoginPassword("");
-        setAuthError(null);
+        setLoginForm({ username: "", password: "" });
+        setAuthError("");
       } else {
         setAuthError("Некорректный ответ сервера");
       }
@@ -153,17 +171,23 @@ function App() {
     }
   };
 
-  // --- выход (пока только локально) ---
-  const handleLogout = () => {
+  // --- выход ---
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (e) {
+      console.error(e);
+    }
     setUser(null);
-    // при желании потом сделаем /api/auth/logout, который будет очищать куку на бэке
   };
 
-  // --- запрос к C++ серверу ---
+  // --- запрос к C++ серверу (только для admin) ---
   const handleGenerate = async () => {
-    // защита: без входа не дергаем API
-    if (!user) {
-      setErrorMsg("Сначала войдите в систему, чтобы генерировать расписание");
+    if (!isAdmin) {
+      setErrorMsg("Генерация расписания доступна только администратору");
       return;
     }
 
@@ -172,8 +196,8 @@ function App() {
 
     try {
       const payload = {
-        algo: "graph", // всегда графовый алгоритм
-        config, // весь config из редактора
+        algo: "graph",
+        config,
       };
 
       const resp = await fetch("/api/schedule", {
@@ -208,7 +232,7 @@ function App() {
     }
   };
 
-  // ЗАГРУЗКА JSON-ФАЙЛА (config + result)
+  // ЗАГРУЗКА JSON-ФАЙЛА (config + result) — только для admin
   const handleImportJson = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -238,7 +262,7 @@ function App() {
     reader.readAsText(file);
   };
 
-  // ВЫГРУЗКА JSON-ФАЙЛА (config + result)
+  // ВЫГРУЗКА JSON-ФАЙЛА (config + result) — только для admin
   const handleExportJson = () => {
     const fullJson = {
       version: 1,
@@ -262,7 +286,7 @@ function App() {
   // список групп для фильтра (из расписания)
   const groupOptions = useMemo(() => {
     const set = new Set();
-    data.schedule.forEach((item) => {
+    (data.schedule || []).forEach((item) => {
       if (item.groupName) set.add(item.groupName);
     });
     return Array.from(set).sort();
@@ -270,7 +294,7 @@ function App() {
 
   const teacherOptions = useMemo(() => {
     const set = new Set();
-    data.schedule.forEach((item) => {
+    (data.schedule || []).forEach((item) => {
       if (item.teacherName) set.add(item.teacherName);
     });
     return Array.from(set).sort();
@@ -278,7 +302,7 @@ function App() {
 
   const subjectOptions = useMemo(() => {
     const set = new Set();
-    data.schedule.forEach((item) => {
+    (data.schedule || []).forEach((item) => {
       if (item.subjectName) set.add(item.subjectName);
     });
     return Array.from(set).sort();
@@ -286,7 +310,10 @@ function App() {
 
   // фильтруем расписание по группе + преподавателю + предмету
   const filteredSchedule = useMemo(() => {
-    return data.schedule.filter((item) => {
+    const baseSchedule = data.schedule || [];
+
+    // сюда позже можно прикрутить "только группа студента"
+    return baseSchedule.filter((item) => {
       if (selectedGroup !== "all" && item.groupName !== selectedGroup) {
         return false;
       }
@@ -447,7 +474,7 @@ function App() {
     });
   };
 
-  // --- JSX-редакторы для config ---
+  // --- JSX-редакторы для config (используются только когда isAdmin === true) ---
 
   const renderGroupsEditor = () => (
     <div style={{ marginTop: "8px" }}>
@@ -1419,6 +1446,11 @@ function App() {
     return null;
   };
 
+  // подзаголовок в шапке
+  const headerSubtitle = isAdmin
+    ? "Исходные данные → JSON → генерация расписания (доступно администратору)"
+    : "Ниже отображается опубликованное расписание экзаменов";
+
   return (
     <div
       style={{
@@ -1482,8 +1514,9 @@ function App() {
                     marginTop: "2px",
                   }}
                 >
-                  Вы можете генерировать расписание и просматривать свои
-                  сохранённые варианты (через API).
+                  {isAdmin
+                    ? "Вы можете редактировать исходные данные и генерировать расписание."
+                    : "Вы можете просматривать опубликованное расписание."}
                 </div>
               </div>
               <button
@@ -1514,9 +1547,10 @@ function App() {
               <span>Вход:</span>
               <input
                 type="text"
+                name="username"
                 placeholder="Логин"
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
+                value={loginForm.username}
+                onChange={handleLoginInputChange}
                 style={{
                   padding: "4px 8px",
                   borderRadius: "8px",
@@ -1529,9 +1563,10 @@ function App() {
               />
               <input
                 type="password"
+                name="password"
                 placeholder="Пароль"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
+                value={loginForm.password}
+                onChange={handleLoginInputChange}
                 style={{
                   padding: "4px 8px",
                   borderRadius: "8px",
@@ -1578,7 +1613,9 @@ function App() {
                     fontSize: "12px",
                   }}
                 >
-                  Для генерации расписания требуется вход.
+                  Редактирование исходных данных доступно только
+                  администратору. Ниже отображается опубликованное
+                  расписание.
                 </span>
               )}
             </form>
@@ -1604,7 +1641,7 @@ function App() {
                 color: theme === "dark" ? "#f9fafb" : "#0f172a",
               }}
             >
-              Генерация расписания экзаменов
+              Расписание экзаменов
             </h1>
             <p
               style={{
@@ -1613,7 +1650,7 @@ function App() {
                 color: palette.textMuted,
               }}
             >
-              Исходные данные → JSON → генерация расписания
+              {headerSubtitle}
             </p>
           </div>
 
@@ -1643,224 +1680,228 @@ function App() {
               Тема: {theme === "dark" ? "тёмная" : "светлая"}
             </button>
 
-            <button
-              onClick={handleGenerate}
-              disabled={!user || loading}
-              title={
-                !user
-                  ? "Нужно войти, чтобы генерировать расписание"
-                  : ""
-              }
-              style={{
-                padding: "8px 14px",
-                borderRadius: "9999px",
-                border: "none",
-                background:
-                  "linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #22c55e 100%)",
-                color: "#02120a",
-                fontWeight: 600,
-                fontSize: "13px",
-                cursor: !user || loading ? "not-allowed" : "pointer",
-                opacity: !user || loading ? 0.7 : 1,
-              }}
-            >
-              Сгенерировать
-            </button>
+            {/* Кнопка генерации — только для admin */}
+            {isAdmin && (
+              <button
+                onClick={handleGenerate}
+                disabled={loading}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "9999px",
+                  border: "none",
+                  background:
+                    "linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #22c55e 100%)",
+                  color: "#02120a",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  opacity: loading ? 0.7 : 1,
+                }}
+              >
+                Сгенерировать
+              </button>
+            )}
           </div>
         </header>
 
-        {/* БЛОК РАБОТЫ С CONFIG / JSON */}
-        <section
-          style={{
-            marginBottom: "18px",
-            padding: "10px 12px",
-            borderRadius: "12px",
-            border: `1px solid ${palette.cardBorder}`,
-            background:
-              theme === "dark"
-                ? "rgba(15,23,42,0.9)"
-                : "rgba(249,250,251,1)",
-            fontSize: "13px",
-          }}
-        >
-          <div
+        {/* БЛОК РАБОТЫ С CONFIG / JSON — только admin */}
+        {isAdmin && (
+          <section
             style={{
-              marginBottom: "6px",
-              fontWeight: 600,
+              marginBottom: "18px",
+              padding: "10px 12px",
+              borderRadius: "12px",
+              border: `1px solid ${palette.cardBorder}`,
+              background:
+                theme === "dark"
+                  ? "rgba(15,23,42,0.9)"
+                  : "rgba(249,250,251,1)",
+              fontSize: "13px",
             }}
           >
-            Исходные данные (config) и JSON-файл
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "10px",
-              alignItems: "center",
-              marginBottom: "8px",
-            }}
-          >
-            <label
+            <div
               style={{
-                display: "inline-flex",
+                marginBottom: "6px",
+                fontWeight: 600,
+              }}
+            >
+              Исходные данные (config) и JSON-файл
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "10px",
                 alignItems: "center",
-                gap: "6px",
-                fontSize: "12px",
-                cursor: "pointer",
+                marginBottom: "8px",
               }}
             >
-              <span
+              <label
                 style={{
-                  padding: "6px 10px",
-                  borderRadius: "9999px",
-                  border: `1px dashed ${palette.cardBorder}`,
-                  background:
-                    theme === "dark" ? "#020617" : "#ffffff",
-                }}
-              >
-                Загрузить JSON…
-              </span>
-              <input
-                type="file"
-                accept="application/json"
-                onChange={handleImportJson}
-                style={{ display: "none" }}
-              />
-            </label>
-
-            <button
-              onClick={handleExportJson}
-              style={{
-                padding: "6px 10px",
-                borderRadius: "9999px",
-                border: `1px solid ${palette.cardBorder}`,
-                background:
-                  theme === "dark" ? "#020617" : "#ffffff",
-                color: palette.textMain,
-                fontSize: "12px",
-                cursor: "pointer",
-              }}
-            >
-              Скачать JSON (config + результат)
-            </button>
-
-            <span style={{ fontSize: "12px", color: palette.textMuted }}>
-              Версия config: {config.version ?? "—"}
-            </span>
-          </div>
-
-          {/* Сводка по config */}
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "12px",
-              fontSize: "12px",
-              color: palette.textMuted,
-              marginBottom: "8px",
-            }}
-          >
-            <span>Групп: {config.groups?.length ?? 0}</span>
-            <span>Преподавателей: {config.teachers?.length ?? 0}</span>
-            <span>Аудиторий: {config.rooms?.length ?? 0}</span>
-            <span>Предметов: {config.subjects?.length ?? 0}</span>
-            <span>Экзаменов: {config.exams?.length ?? 0}</span>
-            <span>
-              Сессия: {config.session?.start ?? "—"} →{" "}
-              {config.session?.end ?? "—"}
-            </span>
-          </div>
-
-          {/* Табы редактора */}
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "6px",
-              marginBottom: "6px",
-              fontSize: "12px",
-            }}
-          >
-            {[
-              { id: "groups", label: "Группы" },
-              { id: "teachers", label: "Преподаватели" },
-              { id: "subjects", label: "Предметы" },
-              { id: "rooms", label: "Аудитории" },
-              { id: "exams", label: "Экзамены" },
-              { id: "session", label: "Сессия" },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setConfigTab(tab.id)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "9999px",
-                  border:
-                    configTab === tab.id
-                      ? "1px solid #3b82f6"
-                      : `1px solid ${palette.cardBorder}`,
-                  background:
-                    configTab === tab.id
-                      ? "rgba(59,130,246,0.12)"
-                      : theme === "dark"
-                      ? "#020617"
-                      : "#ffffff",
-                  color:
-                    configTab === tab.id
-                      ? "#60a5fa"
-                      : palette.textMain,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
                   cursor: "pointer",
                 }}
               >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+                <span
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: "9999px",
+                    border: `1px dashed ${palette.cardBorder}`,
+                    background:
+                      theme === "dark" ? "#020617" : "#ffffff",
+                  }}
+                >
+                  Загрузить JSON…
+                </span>
+                <input
+                  type="file"
+                  accept="application/json"
+                  onChange={handleImportJson}
+                  style={{ display: "none" }}
+                />
+              </label>
 
-          {/* Редактор выбранной сущности */}
-          <div
+              <button
+                onClick={handleExportJson}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "9999px",
+                  border: `1px solid ${palette.cardBorder}`,
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
+                  color: palette.textMain,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Скачать JSON (config + результат)
+              </button>
+
+              <span
+                style={{ fontSize: "12px", color: palette.textMuted }}
+              >
+                Версия config: {config.version ?? "—"}
+              </span>
+            </div>
+
+            {/* Сводка по config */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+                fontSize: "12px",
+                color: palette.textMuted,
+                marginBottom: "8px",
+              }}
+            >
+              <span>Групп: {config.groups?.length ?? 0}</span>
+              <span>Преподавателей: {config.teachers?.length ?? 0}</span>
+              <span>Аудиторий: {config.rooms?.length ?? 0}</span>
+              <span>Предметов: {config.subjects?.length ?? 0}</span>
+              <span>Экзаменов: {config.exams?.length ?? 0}</span>
+              <span>
+                Сессия: {config.session?.start ?? "—"} →{" "}
+                {config.session?.end ?? "—"}
+              </span>
+            </div>
+
+            {/* Табы редактора */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "6px",
+                marginBottom: "6px",
+                fontSize: "12px",
+              }}
+            >
+              {[
+                { id: "groups", label: "Группы" },
+                { id: "teachers", label: "Преподаватели" },
+                { id: "subjects", label: "Предметы" },
+                { id: "rooms", label: "Аудитории" },
+                { id: "exams", label: "Экзамены" },
+                { id: "session", label: "Сессия" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setConfigTab(tab.id)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "9999px",
+                    border:
+                      configTab === tab.id
+                        ? "1px solid #3b82f6"
+                        : `1px solid ${palette.cardBorder}`,
+                    background:
+                      configTab === tab.id
+                        ? "rgba(59,130,246,0.12)"
+                        : theme === "dark"
+                        ? "#020617"
+                        : "#ffffff",
+                    color:
+                      configTab === tab.id
+                        ? "#60a5fa"
+                        : palette.textMain,
+                    cursor: "pointer",
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Редактор выбранной сущности */}
+            <div
+              style={{
+                marginTop: "4px",
+                paddingTop: "4px",
+                borderTop: `1px dashed ${palette.cardBorder}`,
+              }}
+            >
+              {renderConfigEditorTab()}
+            </div>
+          </section>
+        )}
+
+        {/* Блок статуса и ошибок валидатора — только admin */}
+        {isAdmin && data.validation && (
+          <section
             style={{
-              marginTop: "4px",
-              paddingTop: "4px",
-              borderTop: `1px dashed ${palette.cardBorder}`,
+              marginBottom: "10px",
+              padding: "10px 12px",
+              borderRadius: "12px",
+              background:
+                data.validation.ok === true
+                  ? "rgba(22, 163, 74, 0.08)"
+                  : "rgba(220, 38, 38, 0.08)",
+              border:
+                data.validation.ok === true
+                  ? "1px solid rgba(22, 163, 74, 0.6)"
+                  : "1px solid rgba(220, 38, 38, 0.6)",
+              fontSize: "13px",
             }}
           >
-            {renderConfigEditorTab()}
-          </div>
-        </section>
-
-        {/* Блок статуса и ошибок валидатора */}
-        <section
-          style={{
-            marginBottom: "10px",
-            padding: "10px 12px",
-            borderRadius: "12px",
-            background:
-              data.validation.ok === true
-                ? "rgba(22, 163, 74, 0.08)"
-                : "rgba(220, 38, 38, 0.08)",
-            border:
-              data.validation.ok === true
-                ? "1px solid rgba(22, 163, 74, 0.6)"
-                : "1px solid rgba(220, 38, 38, 0.6)",
-            fontSize: "13px",
-          }}
-        >
-          <div style={{ marginBottom: "4px", fontWeight: 600 }}>
-            Валидатор расписания:{" "}
-            {data.validation.ok
-              ? "ошибок не обнаружено"
-              : "есть проблемы"}
-          </div>
-          {data.validation.errors.length > 0 && (
-            <ul style={{ margin: 0, paddingLeft: "18px" }}>
-              {data.validation.errors.map((err, idx) => (
-                <li key={idx}>{err}</li>
-              ))}
-            </ul>
-          )}
-        </section>
+            <div style={{ marginBottom: "4px", fontWeight: 600 }}>
+              Валидатор расписания:{" "}
+              {data.validation.ok
+                ? "ошибок не обнаружено"
+                : "есть проблемы"}
+            </div>
+            {data.validation.errors.length > 0 && (
+              <ul style={{ margin: 0, paddingLeft: "18px" }}>
+                {data.validation.errors.map((err, idx) => (
+                  <li key={idx}>{err}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         {loading && (
           <div

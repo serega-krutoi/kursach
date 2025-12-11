@@ -197,6 +197,55 @@ int main() {
             return 1;
         }
 
+	svr.Get("/api/public/schedule", [&](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    try {
+        auto conn = dbFactory.createConnection();
+        pqxx::work tx{*conn};
+
+        // Берём последнее по времени расписание
+        auto r = tx.exec(
+            "SELECT result_json "
+            "FROM exam_schedule "
+            "ORDER BY created_at DESC "
+            "LIMIT 1"
+        );
+        tx.commit();
+
+        if (r.empty()) {
+            res.status = 404;
+            res.set_content(
+                R"({"error":"no_schedule"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        std::string jsonResp = r[0][0].c_str();
+
+        res.status = 200;
+        res.set_content(jsonResp, "application/json; charset=utf-8");
+    } catch (const std::exception& ex) {
+        logError(std::string("Error in GET /api/public/schedule: ") + ex.what());
+        res.status = 500;
+        res.set_content(
+            R"({"error":"internal server error"})",
+            "application/json; charset=utf-8"
+        );
+    }
+});
+
+// preflight
+svr.Options("/api/public/schedule", [](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.status = 204;
+});
+
         // --- корень ---
         svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
             res.set_header("Access-Control-Allow-Origin", "*");
@@ -565,6 +614,29 @@ svr.Get(R"(/api/schedule/(\d+))", [&](const httplib::Request& req, httplib::Resp
             res.status = 204;
         });
 
+	// --- POST /api/auth/logout ---
+svr.Post("/api/auth/logout", [&](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    // Затираем куку auth_token с нулевым сроком жизни
+    std::string cookie =
+        "auth_token=deleted;"
+        " HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0";
+    res.set_header("Set-Cookie", cookie);
+
+    res.status = 200;
+    res.set_content(R"({"ok":true})", "application/json; charset=utf-8");
+});
+
+svr.Options("/api/auth/logout", [](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.status = 204;
+});
+
         // --- admin-only endpoint: GET /api/admin/ping ---
         svr.Get("/api/admin/ping", [&](const httplib::Request& req, httplib::Response& res) {
             res.set_header("Access-Control-Allow-Origin", "*");
@@ -632,6 +704,32 @@ svr.Get(R"(/api/schedule/(\d+))", [&](const httplib::Request& req, httplib::Resp
                 );
             }
         });
+
+// --- POST /api/auth/logout ---
+svr.Post("/api/auth/logout", [&](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    // Сброс cookie: ставим пустое значение и просроченный срок
+    std::string cookie =
+        "auth_token=;"
+        " HttpOnly; Secure; Path=/; SameSite=Lax;"
+        " Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    res.set_header("Set-Cookie", cookie);
+
+    res.status = 200;
+    res.set_content(R"({"ok":true})", "application/json; charset=utf-8");
+});
+
+// preflight для logout
+svr.Options("/api/auth/logout", [](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.status = 204;
+});
+
 
         // --- GET /api/schedule — дефолтные данные из data.cpp ---
         svr.Get("/api/schedule", [](const httplib::Request& req, httplib::Response& res) {
