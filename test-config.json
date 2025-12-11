@@ -1,5 +1,6 @@
 {
   "algo": "graph",
+  "scheduleName": "Тест API",
   "config": {
     "version": 1,
     "session": {

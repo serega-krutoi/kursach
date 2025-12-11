@@ -25,7 +25,6 @@
 
 using nlohmann::json;
 
-// --- объявления функций из api_json.cpp ---
 std::vector<ExamView> buildExamViews(
     const std::vector<Exam>& exams,
     const std::vector<Group>& groups,
@@ -302,100 +301,170 @@ int main() {
         res.status = 204;
     });
 
+// --- GET /api/schedule/{id} — конкретное расписание пользователя ---
+svr.Get(R"(/api/schedule/(\d+))", [&](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    // проверяем JWT
+    auto payloadOpt = getUserFromRequest(req, jwtSecret);
+    if (!payloadOpt.has_value()) {
+        res.status = 401;
+        res.set_content(R"({"error":"unauthorized"})", "application/json; charset=utf-8");
+        return;
+    }
+    const auto& user = *payloadOpt;
+
+    // вытащим id из пути /api/schedule/{id}
+    if (req.matches.size() < 2) {
+        res.status = 400;
+        res.set_content(R"({"error":"bad_request","message":"missing schedule id"})",
+                        "application/json; charset=utf-8");
+        return;
+    }
+
+    long scheduleId = 0;
+    try {
+        scheduleId = std::stol(req.matches[1].str());
+    } catch (...) {
+        res.status = 400;
+        res.set_content(R"({"error":"bad_request","message":"invalid schedule id"})",
+                        "application/json; charset=utf-8");
+        return;
+    }
+
+    try {
+        auto dbScheduleOpt = scheduleRepo.findScheduleById(user.userId, scheduleId);
+        if (!dbScheduleOpt.has_value()) {
+            res.status = 404;
+            res.set_content(R"({"error":"not_found"})", "application/json; charset=utf-8");
+            return;
+        }
+
+        const db::DbSchedule& s = *dbScheduleOpt;
+
+        // парсим сохранённые JSON-строки
+        json configJson = json::parse(s.configJson);
+        json resultJson = json::parse(s.resultJson);
+
+        json resp = {
+            {"ok", true},
+            {"schedule", {
+                {"id", s.id},
+                {"name", s.name},
+                {"createdAt", s.createdAt},
+                {"updatedAt", s.updatedAt},
+                {"config", configJson},
+                {"result", resultJson}
+            }}
+        };
+
+        res.status = 200;
+        res.set_content(resp.dump(), "application/json; charset=utf-8");
+    } catch (const std::exception& ex) {
+        logError(std::string("Error in GET /api/schedule/{id}: ") + ex.what());
+        res.status = 500;
+        res.set_content(R"({"error":"internal server error"})", "application/json; charset=utf-8");
+    }
+});
+
 	svr.Post("/api/auth/register", [&](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-        try {
-            json j = json::parse(req.body);
+    try {
+        json j = json::parse(req.body);
 
-            std::string username = j.value("username", "");
-            std::string password = j.value("password", "");
-            std::string email    = j.value("email", "");
+        std::string username = j.value("username", "");
+        std::string password = j.value("password", "");
+        std::string email    = j.value("email", "");
 
-            if (username.empty() || password.empty()) {
-                res.status = 400;
-                res.set_content(
-                    R"({"error":"missing username or password"})",
-                    "application/json; charset=utf-8"
-                );
-                return;
-            }
-
-            // базовая нормализация
-            if (username.size() > 64) {
-                res.status = 400;
-                res.set_content(
-                    R"({"error":"username too long"})",
-                    "application/json; charset=utf-8"
-                );
-                return;
-            }
-
-            // хешируем пароль
-            std::string passwordHash = hashPassword(password);
-
-            // роль по умолчанию: student (или methodist — на твой вкус)
-            std::optional<std::string> emailOpt;
-            if (!email.empty()) {
-                emailOpt = email;
-            }
-
-            long newId = userRepo.createUser(
-                username,
-                passwordHash,
-                "student",   // <- можешь поменять на "methodist", если так логичнее
-                emailOpt
-            );
-
-            logInfo("Registered new user: " + username + " (id=" + std::to_string(newId) + ")");
-
-            // Сразу логиним пользователя: создаём JWT и кладём в cookie
-            std::string token = createJwt(newId, "student", jwtSecret, 24 * 3600);
-
-            std::string cookie =
-                "auth_token=" + token +
-                "; HttpOnly; Secure; Path=/; SameSite=Lax";
-
-            res.set_header("Set-Cookie", cookie);
-
-            json resp = {
-                {"ok", true},
-                {"user", {
-                    {"id", newId},
-                    {"username", username},
-                    {"role", "student"}
-                }},
-                {"token", token}
-            };
-
-            res.status = 201;
-            res.set_content(resp.dump(), "application/json; charset=utf-8");
-        } catch (const pqxx::unique_violation &ex) {
-            // username уже занят
-            logInfo(std::string("Register failed (unique_violation): ") + ex.what());
-            res.status = 409;
-            res.set_content(
-                R"({"error":"username already exists"})",
-                "application/json; charset=utf-8"
-            );
-        } catch (const std::exception& ex) {
-            logError(std::string("Error in /api/auth/register: ") + ex.what());
+        if (username.empty() || password.empty()) {
             res.status = 400;
             res.set_content(
-                R"({"error":"invalid json"})",
+                R"({"error":"missing username or password"})",
                 "application/json; charset=utf-8"
             );
-        } catch (...) {
-            logError("Unknown error in /api/auth/register");
-            res.status = 500;
-            res.set_content(
-                R"({"error":"internal server error"})",
-                "application/json; charset=utf-8"
-            );
+            return;
         }
-    });
+
+        if (username.size() > 64) {
+            res.status = 400;
+            res.set_content(
+                R"({"error":"username too long"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        // проверка длины пароля
+        if (password.size() < 6) {
+            res.status = 400;
+            res.set_content(
+                R"({"error":"password too short"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        // хешируем пароль
+        std::string passwordHash = hashPassword(password);
+
+        // роль по умолчанию — methodist
+        std::optional<std::string> emailOpt;
+        if (!email.empty()) {
+            emailOpt = email;
+        }
+
+        long newId = userRepo.createUser(
+            username,
+            passwordHash,
+            "methodist",
+            emailOpt
+        );
+
+        // при регистрации сразу выдаём JWT (можно и без этого, если не нужно автологинить)
+        std::string token = createJwt(newId, "methodist", jwtSecret, 24 * 3600);
+
+        json resp = {
+            {"ok", true},
+            {"user", {
+                {"id", newId},
+                {"username", username},
+                {"role", "methodist"}
+            }},
+            {"token", token}
+        };
+
+        res.status = 201;
+        res.set_content(resp.dump(), "application/json; charset=utf-8");
+    } catch (const pqxx::unique_violation &ex) {
+        // username уже занят
+        logInfo(std::string("Register failed (unique_violation): ") + ex.what());
+        res.status = 409;
+        res.set_content(
+            R"({"error":"username already exists"})",
+            "application/json; charset=utf-8"
+        );
+    } catch (const std::exception& ex) {
+        logError(std::string("Error in /api/auth/register: ") + ex.what());
+        res.status = 400;
+        res.set_content(
+            R"({"error":"invalid json"})",
+            "application/json; charset=utf-8"
+        );
+    } catch (...) {
+        logError("Unknown error in /api/auth/register");
+        res.status = 500;
+        res.set_content(
+            R"({"error":"internal server error"})",
+            "application/json; charset=utf-8"
+        );
+    }
+});
+
 
     // preflight для регистрации
     svr.Options("/api/auth/register", [](const httplib::Request& req, httplib::Response& res) {
@@ -628,6 +697,14 @@ int main() {
 
         json cfg = j["config"];
 
+	// --- необязательное имя расписания ---
+std::optional<std::string> scheduleName;
+if (j.contains("scheduleName") && j["scheduleName"].is_string()) {
+    std::string tmp = j["scheduleName"].get<std::string>();
+    if (!tmp.empty()) {
+        scheduleName = tmp;
+    }
+}
         // --- session ---
         std::string sessionStartLocal = sessionStart;
         std::string sessionEndLocal   = sessionEnd;
@@ -778,12 +855,12 @@ int main() {
         long scheduleId = -1;
         try {
             std::string configDump = cfg.dump();
-            scheduleId = scheduleRepo.createSchedule(
-                static_cast<long>(authUser.userId),
-                configDump,
-                jsonResp,
-                std::nullopt // name пока не задаём, потом можно будет передавать из фронта
-            );
+	    scheduleId = scheduleRepo.createSchedule(
+    		static_cast<long>(authUser.userId),
+    		configDump,
+   	 	jsonResp,
+    	        scheduleName   // <- передаём, если есть
+	    );
             logInfo("Saved schedule id=" + std::to_string(scheduleId) +
                     " for userId=" + std::to_string(authUser.userId));
         } catch (const std::exception& ex) {
@@ -793,18 +870,21 @@ int main() {
         }
 
         // --- если сохранили, добавим scheduleId в ответ ---
-        if (scheduleId > 0) {
-            try {
-                json respJson = json::parse(jsonResp);
-                respJson["scheduleId"] = scheduleId;
-                res.set_content(respJson.dump(), "application/json; charset=utf-8");
-            } catch (...) {
-                // если вдруг парс сломался — просто отдадим исходный JSON
-                res.set_content(jsonResp, "application/json; charset=utf-8");
-            }
-        } else {
-            res.set_content(jsonResp, "application/json; charset=utf-8");
+	if (scheduleId > 0) {
+    try {
+        json respJson = json::parse(jsonResp);
+        respJson["scheduleId"] = scheduleId;
+        if (scheduleName.has_value()) {
+            respJson["scheduleName"] = *scheduleName;
         }
+        res.set_content(respJson.dump(), "application/json; charset=utf-8");
+    } catch (...) {
+        res.set_content(jsonResp, "application/json; charset=utf-8");
+    }
+} else {
+    res.set_content(jsonResp, "application/json; charset=utf-8");
+}
+
 
     } catch (const std::exception& ex) {
         logError(std::string("Error in POST /api/schedule: ") + ex.what());
