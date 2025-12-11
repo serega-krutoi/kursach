@@ -248,6 +248,93 @@ svr.Options("/api/public/schedule", [](const httplib::Request& req, httplib::Res
     res.status = 204;
 });
 
+        // --- ПУБЛИЧНОЕ: последнее сохранённое расписание (config + result) ---
+        svr.Get("/api/public/latest", [&](const httplib::Request& req, httplib::Response& res) {
+            res.set_header("Access-Control-Allow-Origin", "*");
+            res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+            res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+            try {
+                auto conn = dbFactory.createConnection();
+                pqxx::work tx{*conn};
+
+                auto r = tx.exec(
+                    "SELECT id, user_id, COALESCE(name, '') AS name, "
+                    "       config_json::text AS config_json, "
+                    "       result_json::text AS result_json, "
+                    "       created_at, updated_at "
+                    "FROM exam_schedule "
+                    "ORDER BY created_at DESC, id DESC "
+                    "LIMIT 1"
+                );
+                tx.commit();
+
+                if (r.empty()) {
+                    res.status = 404;
+                    res.set_content(
+                        R"({"error":"no_schedule"})",
+                        "application/json; charset=utf-8"
+                    );
+                    return;
+                }
+
+                const auto& row = r[0];
+
+                long id           = row["id"].as<long>();
+                std::string name  = row["name"].as<std::string>("");
+                std::string createdAt = row["created_at"].as<std::string>("");
+                std::string updatedAt = row["updated_at"].as<std::string>("");
+                std::string configStr = row["config_json"].as<std::string>("");
+                std::string resultStr = row["result_json"].as<std::string>("");
+
+                json configJson;
+                json resultJson;
+
+                try {
+                    configJson = json::parse(configStr);
+                } catch (...) {
+                    configJson = json::object();
+                }
+
+                try {
+                    resultJson = json::parse(resultStr);
+                } catch (...) {
+                    resultJson = json::object();
+                }
+
+                json resp = {
+                    {"ok", true},
+                    {"schedule", {
+                        {"id", id},
+                        {"name", name},
+                        {"createdAt", createdAt},
+                        {"updatedAt", updatedAt},
+                        {"config", configJson},
+                        {"result", resultJson}
+                    }}
+                };
+
+                res.status = 200;
+                res.set_content(resp.dump(), "application/json; charset=utf-8");
+            } catch (const std::exception& ex) {
+                logError(std::string("Error in GET /api/public/latest: ") + ex.what());
+                res.status = 500;
+                res.set_content(
+                    R"({"error":"internal server error"})",
+                    "application/json; charset=utf-8"
+                );
+            }
+        });
+
+        // preflight для /api/public/latest
+        svr.Options("/api/public/latest", [](const httplib::Request& req, httplib::Response& res) {
+            res.set_header("Access-Control-Allow-Origin", "*");
+            res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+            res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.status = 204;
+        });
+
+
         // --- корень ---
         svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
             res.set_header("Access-Control-Allow-Origin", "*");

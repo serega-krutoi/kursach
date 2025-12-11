@@ -18,155 +18,6 @@ function createEmptyConfig() {
   };
 }
 
-// ---- Универсальный комбобокс-фильтр ----
-function FilterCombo({
-  label,
-  options,
-  value,
-  onChange,
-  allLabel,
-  allValue,
-  theme,
-  palette,
-  placeholder,
-}) {
-  const [query, setQuery] = useState("");
-
-  // Синхронизация текста с выбранным значением
-  useEffect(() => {
-    if (value === allValue) {
-      setQuery("");
-    } else if (value && options.includes(value)) {
-      setQuery(value);
-    }
-  }, [value, allValue, options]);
-
-  const filteredOptions = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.toLowerCase().includes(q));
-  }, [query, options]);
-
-  const handleSelect = (val) => {
-    onChange(val);
-    if (val === allValue) {
-      setQuery("");
-    } else {
-      setQuery(val);
-    }
-  };
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "4px",
-        fontSize: "12px",
-        minWidth: "210px",
-      }}
-    >
-      <span style={{ color: palette.textMuted }}>{label}</span>
-
-      {/* Псевдо-select: инпут + иконка стрелочки */}
-      <div
-        style={{
-          position: "relative",
-          display: "flex",
-          alignItems: "center",
-        }}
-      >
-        <input
-          type="text"
-          placeholder={placeholder}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "6px 28px 6px 10px",
-            borderRadius: "9999px",
-            border: "1px solid #4b5563",
-            background: theme === "dark" ? "#020617" : "#ffffff",
-            color: palette.textMain,
-            fontSize: "13px",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            right: "9px",
-            pointerEvents: "none",
-            fontSize: "10px",
-            color: palette.textMuted,
-          }}
-        >
-          ▾
-        </div>
-      </div>
-
-      {/* Выпадающий список (по сути — просто список под полем) */}
-      <div
-        style={{
-          marginTop: "2px",
-          borderRadius: "10px",
-          border: `1px solid ${palette.cardBorder}`,
-          background: theme === "dark" ? "#020617" : "#ffffff",
-          maxHeight: "160px",
-          overflowY: "auto",
-          boxShadow:
-            theme === "dark"
-              ? "0 6px 12px rgba(15,23,42,0.8)"
-              : "0 6px 12px rgba(15,23,42,0.15)",
-        }}
-      >
-        <div
-          onClick={() => handleSelect(allValue)}
-          style={{
-            padding: "6px 10px",
-            fontSize: "13px",
-            cursor: "pointer",
-            color: value === allValue ? "#60a5fa" : palette.textMain,
-            background:
-              value === allValue
-                ? "rgba(37,99,235,0.15)"
-                : "transparent",
-          }}
-        >
-          {allLabel}
-        </div>
-        {filteredOptions.length === 0 ? (
-          <div
-            style={{
-              padding: "6px 10px",
-              fontSize: "12px",
-              color: palette.textMuted,
-            }}
-          >
-            Ничего не найдено
-          </div>
-        ) : (
-          filteredOptions.map((opt) => (
-            <div
-              key={opt}
-              onClick={() => handleSelect(opt)}
-              style={{
-                padding: "6px 10px",
-                fontSize: "13px",
-                cursor: "pointer",
-                color: value === opt ? "#60a5fa" : palette.textMain,
-                background:
-                  value === opt ? "rgba(37,99,235,0.15)" : "transparent",
-              }}
-            >
-              {opt}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const [data, setData] = useState(mockResponseGraph);
 
@@ -179,6 +30,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
+  // auth
   const [user, setUser] = useState(null); // { id, username, role } или null
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -187,8 +39,7 @@ function App() {
     password: "",
   });
 
-  // считаем админом того, у кого роль admin или methodist
-  const isAdmin = user?.role === "admin" || user?.role === "methodist";
+  const isAdmin = user?.role === "admin";
 
   // исходные данные (config)
   const [config, setConfig] = useState(createEmptyConfig());
@@ -237,9 +88,9 @@ function App() {
         if (!res.ok) return null;
         return res.json();
       })
-      .then((json) => {
-        if (json && json.ok && json.user) {
-          setUser(json.user);
+      .then((data) => {
+        if (data && data.ok && data.user) {
+          setUser(data.user);
         }
       })
       .catch(() => {
@@ -247,13 +98,14 @@ function App() {
       });
   }, []);
 
-  // --- загрузка опубликованного расписания из БД ---
+  // --- загрузка публичного расписания (только result) для всех пользователей ---
   useEffect(() => {
     const loadPublicSchedule = async () => {
       try {
         const res = await fetch("/api/public/schedule");
         if (!res.ok) return;
         const json = await res.json();
+        // ожидаем, что это ровно тот JSON, который нужен таблице (algorithm, schedule, validation)
         setData(json);
       } catch (e) {
         console.error("Cannot load public schedule", e);
@@ -263,6 +115,65 @@ function App() {
 
     loadPublicSchedule();
   }, []);
+
+  // --- для админа: подтянуть последний config + result из БД ---
+  // --- после логина: подтянуть последнее СОХРАНЁННОЕ расписание пользователя ---
+useEffect(() => {
+  if (!user) return; // не важно admin/methodist — просто нужен залогиненный
+
+  const loadLatestUserSchedule = async () => {
+    try {
+      // 1) Получаем список расписаний текущего пользователя
+      const listRes = await fetch("/api/schedule/my", {
+        credentials: "include",
+      });
+      if (!listRes.ok) {
+        console.warn("GET /api/schedule/my status", listRes.status);
+        return;
+      }
+
+      const listJson = await listRes.json();
+      if (!listJson.ok || !Array.isArray(listJson.items) || listJson.items.length === 0) {
+        console.log("У пользователя ещё нет сохранённых расписаний");
+        return;
+      }
+
+      // backend уже сортирует по created_at DESC, id DESC, так что берём первый
+      const latest = listJson.items[0];
+
+      // 2) Подтягиваем полное расписание по id
+      const oneRes = await fetch(`/api/schedule/${latest.id}`, {
+        credentials: "include",
+      });
+      if (!oneRes.ok) {
+        console.warn("GET /api/schedule/" + latest.id + " status", oneRes.status);
+        return;
+      }
+
+      const oneJson = await oneRes.json();
+      if (!oneJson.ok || !oneJson.schedule) {
+        console.warn("Некорректный ответ от /api/schedule/{id}", oneJson);
+        return;
+      }
+
+      const sched = oneJson.schedule;
+
+      // config из БД → в редактор
+      if (sched.config) {
+        setConfig(sched.config);
+      }
+
+      // result из БД → на таблицу
+      if (sched.result) {
+        setData(sched.result);
+      }
+    } catch (e) {
+      console.error("Cannot load latest user schedule", e);
+    }
+  };
+
+  loadLatestUserSchedule();
+}, [user]);
 
   // --- вход ---
   const handleLogin = async (e) => {
@@ -277,7 +188,7 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include", // чтобы кука прилетела
+        credentials: "include",
         body: JSON.stringify({
           username: loginForm.username,
           password: loginForm.password,
@@ -324,10 +235,25 @@ function App() {
     setUser(null);
   };
 
-  // --- запрос к C++ серверу (генерация) ---
-  const handleGenerate = async () => {
-    if (!isAdmin) {
-      setErrorMsg("Генерация расписания доступна только администратору/методисту");
+  // --- запрос к C++ серверу: генерация и сохранение расписания ---
+  const handleGenerate = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    if (!user || !isAdmin) {
+      setErrorMsg(
+        "Генерация расписания доступна только администратору."
+      );
+      return;
+    }
+
+    const groupsCount = config.groups?.length ?? 0;
+    const examsCount = config.exams?.length ?? 0;
+
+    if (groupsCount === 0 || examsCount === 0) {
+      setErrorMsg(
+        "В конфиге нет групп или экзаменов. " +
+          "Сначала добавьте их в редакторе или загрузите JSON."
+      );
       return;
     }
 
@@ -349,24 +275,27 @@ function App() {
         body: JSON.stringify(payload),
       });
 
-      if (resp.status === 401) {
-        setUser(null);
-        throw new Error("unauthorized");
-      }
-
       if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
+        try {
+          const errJson = await resp.json();
+          if (errJson && errJson.error) {
+            setErrorMsg(`Ошибка от сервера: ${errJson.error}`);
+          } else {
+            setErrorMsg(`Ошибка HTTP ${resp.status}`);
+          }
+        } catch {
+          setErrorMsg(`Ошибка HTTP ${resp.status}`);
+        }
+        return;
       }
 
       const json = await resp.json();
       setData(json);
     } catch (e) {
       console.error(e);
-      if (e.message === "unauthorized") {
-        setErrorMsg("Сессия истекла или неактивна. Войдите снова.");
-      } else {
-        setErrorMsg("Не удалось получить данные от сервера");
-      }
+      setErrorMsg(
+        "Сетевая ошибка при обращении к /api/schedule"
+      );
     } finally {
       setLoading(false);
     }
@@ -423,7 +352,7 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  // список групп / преподавателей / предметов для фильтра (из расписания)
+  // список групп для фильтра (из расписания)
   const groupOptions = useMemo(() => {
     const set = new Set();
     data.schedule.forEach((item) => {
@@ -448,7 +377,7 @@ function App() {
     return Array.from(set).sort();
   }, [data]);
 
-  // фильтрация расписания по выбранным значениям
+  // фильтруем расписание по группе + преподавателю + предмету
   const filteredSchedule = useMemo(() => {
     return data.schedule.filter((item) => {
       if (selectedGroup !== "all" && item.groupName !== selectedGroup) {
@@ -464,7 +393,7 @@ function App() {
     });
   }, [data, selectedGroup, selectedTeacher, selectedSubject]);
 
-  // стили для таблицы
+  // стили для заголовков таблицы и ячеек
   const thStyle = {
     padding: "8px 10px",
     textAlign: "left",
@@ -494,7 +423,6 @@ function App() {
   const nextId = (items) =>
     (items?.reduce((max, item) => Math.max(max, item.id ?? 0), 0) || 0) + 1;
 
-  // обновление поля сущности по id
   const updateItemField = (listName, id, field, value) => {
     setConfig((prev) => {
       const list = prev[listName] || [];
@@ -522,10 +450,7 @@ function App() {
         size: 25,
         examIds: [],
       };
-      return {
-        ...prev,
-        groups: [...(prev.groups || []), newGroup],
-      };
+      return { ...prev, groups: [...(prev.groups || []), newGroup] };
     });
   };
 
@@ -537,10 +462,7 @@ function App() {
         name: `Преподаватель ${id}`,
         subjects: [],
       };
-      return {
-        ...prev,
-        teachers: [...(prev.teachers || []), newTeacher],
-      };
+      return { ...prev, teachers: [...(prev.teachers || []), newTeacher] };
     });
   };
 
@@ -552,10 +474,7 @@ function App() {
         name: `Предмет ${id}`,
         difficulty: 3,
       };
-      return {
-        ...prev,
-        subjects: [...(prev.subjects || []), newSubject],
-      };
+      return { ...prev, subjects: [...(prev.subjects || []), newSubject] };
     });
   };
 
@@ -567,10 +486,7 @@ function App() {
         name: `Аудитория ${id}`,
         capacity: 30,
       };
-      return {
-        ...prev,
-        rooms: [...(prev.rooms || []), newRoom],
-      };
+      return { ...prev, rooms: [...(prev.rooms || []), newRoom] };
     });
   };
 
@@ -588,14 +504,9 @@ function App() {
         subjectId: firstSubjectId,
         durationMinutes: 120,
       };
-      return {
-        ...prev,
-        exams: [...(prev.exams || []), newExam],
-      };
+      return { ...prev, exams: [...(prev.exams || []), newExam] };
     });
   };
-
-  // --- работа с предметами преподавателя ---
 
   const addTeacherSubject = (teacherId, subjectId) => {
     if (!subjectId) return;
@@ -625,8 +536,6 @@ function App() {
       return { ...prev, teachers: updated };
     });
   };
-
-  // --- JSX-редакторы для config (только для админа) ---
 
   const renderGroupsEditor = () => (
     <div style={{ marginTop: "8px" }}>
@@ -683,13 +592,18 @@ function App() {
           <input
             type="text"
             value={g.name}
-            onChange={(e) => updateItemField("groups", g.id, "name", e.target.value)}
+            onChange={(e) =>
+              updateItemField("groups", g.id, "name", e.target.value)
+            }
             placeholder="Название группы"
             style={{
               padding: "4px 6px",
               borderRadius: "6px",
               border: `1px solid ${palette.cardBorder}`,
-              background: theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+              background:
+                theme === "dark"
+                  ? "rgba(15,23,42,0.8)"
+                  : "#ffffff",
               color: palette.textMain,
             }}
           />
@@ -718,7 +632,10 @@ function App() {
                 padding: "4px 6px",
                 borderRadius: "6px",
                 border: `1px solid ${palette.cardBorder}`,
-                background: theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                background:
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
                 color: palette.textMain,
               }}
             />
@@ -810,12 +727,19 @@ function App() {
                 marginBottom: "4px",
               }}
             >
-              <span style={{ color: palette.textMuted }}>id: {t.id}</span>
+              <span style={{ color: palette.textMuted }}>
+                id: {t.id}
+              </span>
               <input
                 type="text"
                 value={t.name}
                 onChange={(e) =>
-                  updateItemField("teachers", t.id, "name", e.target.value)
+                  updateItemField(
+                    "teachers",
+                    t.id,
+                    "name",
+                    e.target.value
+                  )
                 }
                 placeholder="ФИО преподавателя"
                 style={{
@@ -823,7 +747,9 @@ function App() {
                   borderRadius: "6px",
                   border: `1px solid ${palette.cardBorder}`,
                   background:
-                    theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                    theme === "dark"
+                      ? "rgba(15,23,42,0.8)"
+                      : "#ffffff",
                   color: palette.textMain,
                 }}
               />
@@ -874,7 +800,9 @@ function App() {
                   borderRadius: "9999px",
                   border: `1px solid ${palette.cardBorder}`,
                   background:
-                    theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                    theme === "dark"
+                      ? "rgba(15,23,42,0.8)"
+                      : "#ffffff",
                   color: palette.textMain,
                   fontSize: "11px",
                 }}
@@ -910,7 +838,8 @@ function App() {
                 >
                   {teacherSubjects.map((sid) => {
                     const subj =
-                      config.subjects?.find((s) => s.id === sid) || null;
+                      config.subjects?.find((s) => s.id === sid) ||
+                      null;
                     const label = subj?.name || `Предмет ${sid}`;
                     return (
                       <span
@@ -930,7 +859,9 @@ function App() {
                       >
                         {label}
                         <button
-                          onClick={() => removeTeacherSubject(t.id, sid)}
+                          onClick={() =>
+                            removeTeacherSubject(t.id, sid)
+                          }
                           style={{
                             border: "none",
                             background: "transparent",
@@ -1017,7 +948,10 @@ function App() {
               padding: "4px 6px",
               borderRadius: "6px",
               border: `1px solid ${palette.cardBorder}`,
-              background: theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+              background:
+                theme === "dark"
+                  ? "rgba(15,23,42,0.8)"
+                  : "#ffffff",
               color: palette.textMain,
             }}
           />
@@ -1049,7 +983,9 @@ function App() {
                 borderRadius: "6px",
                 border: `1px solid ${palette.cardBorder}`,
                 background:
-                  theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
                 color: palette.textMain,
               }}
               title="Сложность экзамена: 1 — очень легко, 5 — очень сложно"
@@ -1145,7 +1081,10 @@ function App() {
               padding: "4px 6px",
               borderRadius: "6px",
               border: `1px solid ${palette.cardBorder}`,
-              background: theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+              background:
+                theme === "dark"
+                  ? "rgba(15,23,42,0.8)"
+                  : "#ffffff",
               color: palette.textMain,
             }}
           />
@@ -1173,7 +1112,9 @@ function App() {
                 borderRadius: "6px",
                 border: `1px solid ${palette.cardBorder}`,
                 background:
-                  theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
                 color: palette.textMain,
               }}
             />
@@ -1262,7 +1203,8 @@ function App() {
         const subject =
           config.subjects?.find((s) => s.id === subjectId) || null;
 
-        const showFilterHint = subjectId != null && filteredBySubject.length > 0;
+        const showFilterHint =
+          subjectId != null && filteredBySubject.length > 0;
 
         return (
           <div
@@ -1279,7 +1221,6 @@ function App() {
           >
             <span style={{ color: palette.textMuted }}>id: {e.id}</span>
 
-            {/* группа */}
             <select
               value={e.groupId ?? ""}
               onChange={(ev) =>
@@ -1294,7 +1235,10 @@ function App() {
                 padding: "4px 6px",
                 borderRadius: "6px",
                 border: `1px solid ${palette.cardBorder}`,
-                background: theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                background:
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
                 color: palette.textMain,
               }}
             >
@@ -1306,7 +1250,6 @@ function App() {
               ))}
             </select>
 
-            {/* преподаватель (фильтр по предмету) */}
             <div
               style={{
                 display: "flex",
@@ -1321,7 +1264,9 @@ function App() {
                     "exams",
                     e.id,
                     "teacherId",
-                    ev.target.value ? parseInt(ev.target.value, 10) : null
+                    ev.target.value
+                      ? parseInt(ev.target.value, 10)
+                      : null
                   )
                 }
                 style={{
@@ -1329,7 +1274,9 @@ function App() {
                   borderRadius: "6px",
                   border: `1px solid ${palette.cardBorder}`,
                   background:
-                    theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                    theme === "dark"
+                      ? "rgba(15,23,42,0.8)"
+                      : "#ffffff",
                   color: palette.textMain,
                 }}
               >
@@ -1348,12 +1295,12 @@ function App() {
                   }}
                 >
                   Показаны только преподы, ведущие «
-                  {subject?.name || `Предмет ${subjectId}`}»
+                  {subject?.name || `Предмет ${subjectId}`}
+                  »
                 </span>
               )}
             </div>
 
-            {/* предмет */}
             <select
               value={e.subjectId ?? ""}
               onChange={(ev) =>
@@ -1368,7 +1315,10 @@ function App() {
                 padding: "4px 6px",
                 borderRadius: "6px",
                 border: `1px solid ${palette.cardBorder}`,
-                background: theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                background:
+                  theme === "dark"
+                    ? "rgba(15,23,42,0.8)"
+                    : "#ffffff",
                 color: palette.textMain,
               }}
             >
@@ -1380,7 +1330,6 @@ function App() {
               ))}
             </select>
 
-            {/* длительность */}
             <div
               style={{
                 display: "flex",
@@ -1408,7 +1357,9 @@ function App() {
                   borderRadius: "6px",
                   border: `1px solid ${palette.cardBorder}`,
                   background:
-                    theme === "dark" ? "rgba(15,23,42,0.8)" : "#ffffff",
+                    theme === "dark"
+                      ? "rgba(15,23,42,0.8)"
+                      : "#ffffff",
                   color: palette.textMain,
                 }}
                 title="Длительность экзамена в минутах"
@@ -1445,12 +1396,7 @@ function App() {
 
   const renderSessionEditor = () => (
     <div style={{ marginTop: "8px", fontSize: "12px" }}>
-      <div
-        style={{
-          marginBottom: "10px",
-          fontWeight: 500,
-        }}
-      >
+      <div style={{ marginBottom: "10px", fontWeight: 500 }}>
         Параметры сессии
       </div>
 
@@ -1470,10 +1416,7 @@ function App() {
           onChange={(e) =>
             setConfig((prev) => ({
               ...prev,
-              session: {
-                ...prev.session,
-                start: e.target.value,
-              },
+              session: { ...prev.session, start: e.target.value },
             }))
           }
           style={{
@@ -1502,10 +1445,7 @@ function App() {
           onChange={(e) =>
             setConfig((prev) => ({
               ...prev,
-              session: {
-                ...prev.session,
-                end: e.target.value,
-              },
+              session: { ...prev.session, end: e.target.value },
             }))
           }
           style={{
@@ -1539,7 +1479,10 @@ function App() {
               ...prev,
               session: {
                 ...prev.session,
-                maxExamsPerDayForGroup: parseInt(e.target.value || "1", 10),
+                maxExamsPerDayForGroup: parseInt(
+                  e.target.value || "1",
+                  10
+                ),
               },
             }))
           }
@@ -1565,14 +1508,6 @@ function App() {
     if (configTab === "session") return renderSessionEditor();
     return null;
   };
-
-  // заголовок для гостя vs админ
-  const headerTitle = isAdmin
-    ? "Генерация расписания экзаменов"
-    : "Расписание экзаменационной сессии";
-  const headerSubtitle = isAdmin
-    ? "Исходные данные → JSON → генерация расписания"
-    : "Просмотр опубликованного расписания сессии";
 
   return (
     <div
@@ -1627,20 +1562,21 @@ function App() {
               <div>
                 <div>
                   Вход выполнен как{" "}
-                  <b>{user.username ? user.username : `user#${user.id}`}</b>{" "}
-                  ({user.role})
+                    <b>{user.username || `user#${user.id}`}</b> (
+                    {user.role})
                 </div>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    color: palette.textMuted,
-                    marginTop: "2px",
-                  }}
-                >
-                  {isAdmin
-                    ? "Вы можете редактировать исходные данные и генерировать новое расписание."
-                    : "Вы можете просматривать опубликованное расписание."}
-                </div>
+                {isAdmin && (
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: palette.textMuted,
+                      marginTop: "2px",
+                    }}
+                  >
+                    Вы можете генерировать расписание и редактировать
+                    исходные данные.
+                  </div>
+                )}
               </div>
               <button
                 onClick={handleLogout}
@@ -1682,7 +1618,8 @@ function App() {
                   padding: "4px 8px",
                   borderRadius: "8px",
                   border: `1px solid ${palette.cardBorder}`,
-                  background: theme === "dark" ? "#020617" : "#ffffff",
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
                   color: palette.textMain,
                   fontSize: "13px",
                 }}
@@ -1701,7 +1638,8 @@ function App() {
                   padding: "4px 8px",
                   borderRadius: "8px",
                   border: `1px solid ${palette.cardBorder}`,
-                  background: theme === "dark" ? "#020617" : "#ffffff",
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
                   color: palette.textMain,
                   fontSize: "13px",
                 }}
@@ -1742,70 +1680,73 @@ function App() {
                     fontSize: "12px",
                   }}
                 >
-                  Для генерации расписания требуется вход под админом/методистом.
+                  Для генерации расписания требуется вход.
                 </span>
               )}
             </form>
           )}
         </div>
 
-        {/* ШАПКА */}
-        <header
-          style={{
-            marginBottom: "20px",
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "16px",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <h1
-              style={{
-                fontSize: "22px",
-                margin: 0,
-                color: theme === "dark" ? "#f9fafb" : "#0f172a",
-              }}
-            >
-              {headerTitle}
-            </h1>
-            <p
-              style={{
-                margin: "4px 0 0",
-                fontSize: "13px",
-                color: palette.textMuted,
-              }}
-            >
-              {headerSubtitle}
-            </p>
-          </div>
-
-          <div
+        {/* ШАПКА — только для админа */}
+        {isAdmin && (
+          <header
             style={{
+              marginBottom: "20px",
               display: "flex",
-              gap: "8px",
+              justifyContent: "space-between",
+              gap: "16px",
               alignItems: "center",
               flexWrap: "wrap",
             }}
           >
-            <button
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            <div>
+              <h1
+                style={{
+                  fontSize: "22px",
+                  margin: 0,
+                  color:
+                    theme === "dark" ? "#f9fafb" : "#0f172a",
+                }}
+              >
+                Генерация расписания экзаменов
+              </h1>
+              <p
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: "13px",
+                  color: palette.textMuted,
+                }}
+              >
+                Исходные данные → JSON → генерация расписания
+              </p>
+            </div>
+
+            <div
               style={{
-                padding: "6px 10px",
-                borderRadius: "9999px",
-                border: `1px solid ${palette.cardBorder}`,
-                background: theme === "dark" ? "#020617" : "#ffffff",
-                color: palette.textMain,
-                fontSize: "12px",
-                cursor: "pointer",
+                display: "flex",
+                gap: "8px",
+                alignItems: "center",
+                flexWrap: "wrap",
               }}
             >
-              Тема: {theme === "dark" ? "тёмная" : "светлая"}
-            </button>
+              <button
+                onClick={() =>
+                  setTheme(theme === "dark" ? "light" : "dark")
+                }
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "9999px",
+                  border: `1px solid ${palette.cardBorder}`,
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
+                  color: palette.textMain,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Тема: {theme === "dark" ? "тёмная" : "светлая"}
+              </button>
 
-            {/* Кнопка генерации видна только админу */}
-            {isAdmin && (
               <button
                 onClick={handleGenerate}
                 disabled={loading}
@@ -1824,9 +1765,38 @@ function App() {
               >
                 {loading ? "Генерируем..." : "Сгенерировать"}
               </button>
-            )}
+            </div>
+          </header>
+        )}
+
+        {/* Тумблер темы для обычных пользователей */}
+        {!isAdmin && (
+          <div
+            style={{
+              marginBottom: "12px",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <button
+              onClick={() =>
+                setTheme(theme === "dark" ? "light" : "dark")
+              }
+              style={{
+                padding: "6px 10px",
+                borderRadius: "9999px",
+                border: `1px solid ${palette.cardBorder}`,
+                background:
+                  theme === "dark" ? "#020617" : "#ffffff",
+                color: palette.textMain,
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Тема: {theme === "dark" ? "тёмная" : "светлая"}
+            </button>
           </div>
-        </header>
+        )}
 
         {/* БЛОК РАБОТЫ С CONFIG / JSON — только для админа */}
         {isAdmin && (
@@ -1875,7 +1845,8 @@ function App() {
                     padding: "6px 10px",
                     borderRadius: "9999px",
                     border: `1px dashed ${palette.cardBorder}`,
-                    background: theme === "dark" ? "#020617" : "#ffffff",
+                    background:
+                      theme === "dark" ? "#020617" : "#ffffff",
                   }}
                 >
                   Загрузить JSON…
@@ -1894,7 +1865,8 @@ function App() {
                   padding: "6px 10px",
                   borderRadius: "9999px",
                   border: `1px solid ${palette.cardBorder}`,
-                  background: theme === "dark" ? "#020617" : "#ffffff",
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
                   color: palette.textMain,
                   fontSize: "12px",
                   cursor: "pointer",
@@ -1913,7 +1885,6 @@ function App() {
               </span>
             </div>
 
-            {/* Сводка по config */}
             <div
               style={{
                 display: "flex",
@@ -1925,17 +1896,22 @@ function App() {
               }}
             >
               <span>Групп: {config.groups?.length ?? 0}</span>
-              <span>Преподавателей: {config.teachers?.length ?? 0}</span>
+              <span>
+                Преподавателей: {config.teachers?.length ?? 0}
+              </span>
               <span>Аудиторий: {config.rooms?.length ?? 0}</span>
-              <span>Предметов: {config.subjects?.length ?? 0}</span>
-              <span>Экзаменов: {config.exams?.length ?? 0}</span>
+              <span>
+                Предметов: {config.subjects?.length ?? 0}
+              </span>
+              <span>
+                Экзаменов: {config.exams?.length ?? 0}
+              </span>
               <span>
                 Сессия: {config.session?.start ?? "—"} →{" "}
                 {config.session?.end ?? "—"}
               </span>
             </div>
 
-            {/* Табы редактора */}
             <div
               style={{
                 display: "flex",
@@ -1970,7 +1946,9 @@ function App() {
                         ? "#020617"
                         : "#ffffff",
                     color:
-                      configTab === tab.id ? "#60a5fa" : palette.textMain,
+                      configTab === tab.id
+                        ? "#60a5fa"
+                        : palette.textMain,
                     cursor: "pointer",
                   }}
                 >
@@ -1979,7 +1957,6 @@ function App() {
               ))}
             </div>
 
-            {/* Редактор выбранной сущности */}
             <div
               style={{
                 marginTop: "4px",
@@ -1992,49 +1969,37 @@ function App() {
           </section>
         )}
 
-        {/* Блок статуса и ошибок валидатора — тоже только для админа */}
-        {isAdmin && (
-          <section
-            style={{
-              marginBottom: "10px",
-              padding: "10px 12px",
-              borderRadius: "12px",
-              background:
-                data.validation.ok === true
-                  ? "rgba(22, 163, 74, 0.08)"
-                  : "rgba(220, 38, 38, 0.08)",
-              border:
-                data.validation.ok === true
-                  ? "1px solid rgba(22, 163, 74, 0.6)"
-                  : "1px solid rgba(220, 38, 38, 0.6)",
-              fontSize: "13px",
-            }}
-          >
-            <div
-              style={{
-                marginBottom: "4px",
-                fontWeight: 600,
-              }}
-            >
-              Валидатор расписания:{" "}
-              {data.validation.ok
-                ? "ошибок не обнаружено"
-                : "есть проблемы"}
-            </div>
-            {data.validation.errors.length > 0 && (
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: "18px",
-                }}
-              >
-                {data.validation.errors.map((err, idx) => (
-                  <li key={idx}>{err}</li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
+        {/* Блок статуса валидатора — показываем всем, если есть data.validation */}
+        <section
+          style={{
+            marginBottom: "10px",
+            padding: "10px 12px",
+            borderRadius: "12px",
+            background:
+              data.validation.ok === true
+                ? "rgba(22, 163, 74, 0.08)"
+                : "rgba(220, 38, 38, 0.08)",
+            border:
+              data.validation.ok === true
+                ? "1px solid rgba(22, 163, 74, 0.6)"
+                : "1px solid rgba(220, 38, 38, 0.6)",
+            fontSize: "13px",
+          }}
+        >
+          <div style={{ marginBottom: "4px", fontWeight: 600 }}>
+            Валидатор расписания:{" "}
+            {data.validation.ok
+              ? "ошибок не обнаружено"
+              : "есть проблемы"}
+          </div>
+          {data.validation.errors.length > 0 && (
+            <ul style={{ margin: 0, paddingLeft: "18px" }}>
+              {data.validation.errors.map((err, idx) => (
+                <li key={idx}>{err}</li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         {loading && (
           <div
@@ -2044,7 +2009,7 @@ function App() {
               color: palette.textMuted,
             }}
           >
-            Загружаем расписание с сервера...
+            Загружаем расписание/генерируем...
           </div>
         )}
 
@@ -2060,62 +2025,92 @@ function App() {
           </div>
         )}
 
-        {/* Фильтры по расписанию (новый вид) */}
+        {/* Фильтры по расписанию */}
         <div
           style={{
             marginTop: "16px",
             marginBottom: "12px",
             display: "flex",
-            gap: "12px",
+            gap: "8px",
             flexWrap: "wrap",
-            alignItems: "flex-start",
+            alignItems: "center",
           }}
         >
           <span
             style={{
               fontSize: "13px",
               color: palette.textMuted,
-              marginTop: "6px",
             }}
           >
             Фильтры:
           </span>
 
-          <FilterCombo
-            label="Группа"
-            options={groupOptions}
+          <select
             value={selectedGroup}
-            onChange={setSelectedGroup}
-            allLabel="Все группы"
-            allValue="all"
-            theme={theme}
-            palette={palette}
-            placeholder="Начните вводить группу..."
-          />
+            onChange={(e) => setSelectedGroup(e.target.value)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              border: "1px solid #4b5563",
+              background:
+                theme === "dark" ? "#020617" : "#ffffff",
+              color: palette.textMain,
+              fontSize: "13px",
+            }}
+          >
+            <option value="all">Все группы</option>
+            {groupOptions.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
 
-          <FilterCombo
-            label="Преподаватель"
-            options={teacherOptions}
+          <select
             value={selectedTeacher}
-            onChange={setSelectedTeacher}
-            allLabel="Все преподаватели"
-            allValue="all"
-            theme={theme}
-            palette={palette}
-            placeholder="Начните вводить ФИО..."
-          />
+            onChange={(e) =>
+              setSelectedTeacher(e.target.value)
+            }
+            style={{
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              border: "1px solid #4b5563",
+              background:
+                theme === "dark" ? "#020617" : "#ffffff",
+              color: palette.textMain,
+              fontSize: "13px",
+            }}
+          >
+            <option value="all">Все преподаватели</option>
+            {teacherOptions.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
 
-          <FilterCombo
-            label="Предмет"
-            options={subjectOptions}
+          <select
             value={selectedSubject}
-            onChange={setSelectedSubject}
-            allLabel="Все предметы"
-            allValue="all"
-            theme={theme}
-            palette={palette}
-            placeholder="Начните вводить предмет..."
-          />
+            onChange={(e) =>
+              setSelectedSubject(e.target.value)
+            }
+            style={{
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              border: "1px solid #4b5563",
+              background:
+                theme === "dark" ? "#020617" : "#ffffff",
+              color: palette.textMain,
+              fontSize: "13px",
+            }}
+          >
+            <option value="all">Все предметы</option>
+            {subjectOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Таблица расписания */}
