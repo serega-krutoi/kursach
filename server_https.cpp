@@ -198,6 +198,7 @@ int main() {
         }
 
 // --- Публичное расписание, доступное всем (гости/студенты) ---
+
 svr.Get("/api/public/schedule", [&](const httplib::Request& req, httplib::Response& res) {
     res.set_header("Access-Control-Allow-Origin", "*");
     res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -207,22 +208,19 @@ svr.Get("/api/public/schedule", [&](const httplib::Request& req, httplib::Respon
         auto conn = dbFactory.createConnection();
         pqxx::work tx{*conn};
 
-        // Берём последнее опубликованное расписание
+        // Просто берём самое последнее расписание
         auto r = tx.exec(
-            R"SQL(
-                SELECT result_json::text
-                FROM exam_schedule
-                WHERE is_public = TRUE
-                ORDER BY published_at DESC, id DESC
-                LIMIT 1
-            )SQL"
+            "SELECT result_json "
+            "FROM exam_schedule "
+            "ORDER BY created_at DESC "
+            "LIMIT 1"
         );
         tx.commit();
 
         if (r.empty()) {
             res.status = 404;
             res.set_content(
-                R"({"error":"no_published_schedule"})",
+                R"({"error":"no_schedule"})",
                 "application/json; charset=utf-8"
             );
             return;
@@ -249,7 +247,6 @@ svr.Options("/api/public/schedule", [](const httplib::Request& req, httplib::Res
     res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.status = 204;
 });
-
 
         // --- корень ---
         svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {

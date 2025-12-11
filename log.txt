@@ -4495,3 +4495,98 @@ DETAIL:  Key (username)=(testuser) already exists.
 [2025-12-11 14:32:57][INFO] Экзаменов: 6, назначений: 6, групп: 5, преподавателей: 3, аудиторий: 4, слотов: 8
 [2025-12-11 14:32:57][INFO] Проверка расписания завершена: ошибок не обнаружено.
 [2025-12-11 14:32:57][INFO] Saved schedule id=17 for userId=1
+[2025-12-11 15:12:29][INFO] Login success for user: admin (role=admin)
+[2025-12-11 15:12:42][INFO] POST /api/schedule userId=1 groups=5 teachers=3 rooms=4 subjects=3 exams=6 timeslots=8 maxPerDay=1
+[2025-12-11 15:12:42][INFO] Запускаем graph-генератор (maxPerDay=1)
+[2025-12-11 15:12:42][INFO] === Запуск генерации расписания ===
+[2025-12-11 15:12:42][INFO] Экзаменов: 6, групп: 5, слотов: 8, аудиторий: 4
+[2025-12-11 15:12:42][DEBUG] Цвет 0: экзаменов=3, средняя_сложность=3.333333
+[2025-12-11 15:12:42][DEBUG] Цвет 1: экзаменов=3, средняя_сложность=3.333333
+[2025-12-11 15:12:42][INFO] Цвет 0 (avgDifficulty=3.333333) -> слот 1 (2025-01-20)
+[2025-12-11 15:12:42][INFO] Цвет 1 (avgDifficulty=3.333333) -> слот 2 (2025-01-20)
+[2025-12-11 15:12:42][DEBUG] Назначаем exam id=1 (groupId=1, color=0) в слот id=1
+[2025-12-11 15:12:42][INFO] Экзамен id=1 назначен в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:12:42][DEBUG] Назначаем exam id=2 (groupId=1, color=1) в слот id=2
+[2025-12-11 15:12:42][DEBUG] Базовый слот 2 нарушает maxExamsPerDayForGroup для группы 1
+[2025-12-11 15:12:42][WARN] В базовом слоте 2 для exam id=2 найден конфликт (граф или maxPerDay).
+[2025-12-11 15:12:42][INFO] Переназначили exam id=2 в альтернативный слот 3 в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:12:42][DEBUG] Назначаем exam id=3 (groupId=2, color=0) в слот id=1
+[2025-12-11 15:12:42][INFO] Экзамен id=3 назначен в аудиторию Кабинет 400 (capacity=30)
+[2025-12-11 15:12:42][DEBUG] Назначаем exam id=4 (groupId=3, color=1) в слот id=2
+[2025-12-11 15:12:42][INFO] Экзамен id=4 назначен в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:12:42][DEBUG] Назначаем exam id=5 (groupId=4, color=1) в слот id=2
+[2025-12-11 15:12:42][INFO] Экзамен id=5 назначен в аудиторию Кабинет 400 (capacity=30)
+[2025-12-11 15:12:42][DEBUG] Назначаем exam id=6 (groupId=5, color=0) в слот id=1
+[2025-12-11 15:12:42][INFO] Экзамен id=6 назначен в аудиторию Кабинет 110 (capacity=30)
+[2025-12-11 15:12:42][INFO] === Генерация расписания завершена ===
+[2025-12-11 15:12:42][INFO] === Запуск проверки расписания ===
+[2025-12-11 15:12:42][INFO] Экзаменов: 6, назначений: 6, групп: 5, преподавателей: 3, аудиторий: 4, слотов: 8
+[2025-12-11 15:12:42][INFO] Проверка расписания завершена: ошибок не обнаружено.
+[2025-12-11 15:12:42][INFO] Saved schedule id=18 for userId=1
+[2025-12-11 15:15:01][INFO] POST /api/schedule userId=1 groups=5 teachers=3 rooms=4 subjects=3 exams=6 timeslots=8 maxPerDay=1
+[2025-12-11 15:15:01][INFO] Запускаем graph-генератор (maxPerDay=1)
+[2025-12-11 15:15:01][INFO] === Запуск генерации расписания ===
+[2025-12-11 15:15:01][INFO] Экзаменов: 6, групп: 5, слотов: 8, аудиторий: 4
+[2025-12-11 15:15:01][DEBUG] Цвет 0: экзаменов=3, средняя_сложность=3.333333
+[2025-12-11 15:15:01][DEBUG] Цвет 1: экзаменов=3, средняя_сложность=3.333333
+[2025-12-11 15:15:01][INFO] Цвет 0 (avgDifficulty=3.333333) -> слот 1 (2025-01-20)
+[2025-12-11 15:15:01][INFO] Цвет 1 (avgDifficulty=3.333333) -> слот 2 (2025-01-20)
+[2025-12-11 15:15:01][DEBUG] Назначаем exam id=1 (groupId=1, color=0) в слот id=1
+[2025-12-11 15:15:01][INFO] Экзамен id=1 назначен в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:15:01][DEBUG] Назначаем exam id=2 (groupId=1, color=1) в слот id=2
+[2025-12-11 15:15:01][DEBUG] Базовый слот 2 нарушает maxExamsPerDayForGroup для группы 1
+[2025-12-11 15:15:01][WARN] В базовом слоте 2 для exam id=2 найден конфликт (граф или maxPerDay).
+[2025-12-11 15:15:01][INFO] Переназначили exam id=2 в альтернативный слот 3 в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:15:01][DEBUG] Назначаем exam id=3 (groupId=2, color=0) в слот id=1
+[2025-12-11 15:15:01][INFO] Экзамен id=3 назначен в аудиторию Кабинет 400 (capacity=30)
+[2025-12-11 15:15:01][DEBUG] Назначаем exam id=4 (groupId=3, color=1) в слот id=2
+[2025-12-11 15:15:01][INFO] Экзамен id=4 назначен в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:15:01][DEBUG] Назначаем exam id=5 (groupId=4, color=1) в слот id=2
+[2025-12-11 15:15:01][INFO] Экзамен id=5 назначен в аудиторию Кабинет 400 (capacity=30)
+[2025-12-11 15:15:01][DEBUG] Назначаем exam id=6 (groupId=5, color=0) в слот id=1
+[2025-12-11 15:15:01][INFO] Экзамен id=6 назначен в аудиторию Кабинет 110 (capacity=30)
+[2025-12-11 15:15:01][INFO] === Генерация расписания завершена ===
+[2025-12-11 15:15:01][INFO] === Запуск проверки расписания ===
+[2025-12-11 15:15:01][INFO] Экзаменов: 6, назначений: 6, групп: 5, преподавателей: 3, аудиторий: 4, слотов: 8
+[2025-12-11 15:15:01][INFO] Проверка расписания завершена: ошибок не обнаружено.
+[2025-12-11 15:15:01][INFO] Saved schedule id=19 for userId=1
+[2025-12-11 15:24:17][INFO] === Запуск HTTPS сервера на 127.0.0.1:8443 ===
+[2025-12-11 15:24:17][INFO] Успешно инициализирована конфигурация БД
+[2025-12-11 15:24:43][INFO] Login success for user: admin (role=admin)
+[2025-12-11 15:24:50][INFO] POST /api/schedule userId=1 groups=5 teachers=3 rooms=4 subjects=3 exams=6 timeslots=8 maxPerDay=2
+[2025-12-11 15:24:50][INFO] Запускаем graph-генератор (maxPerDay=2)
+[2025-12-11 15:24:50][INFO] === Запуск генерации расписания ===
+[2025-12-11 15:24:50][INFO] Экзаменов: 6, групп: 5, слотов: 8, аудиторий: 4
+[2025-12-11 15:24:50][DEBUG] Цвет 0: экзаменов=3, средняя_сложность=3.333333
+[2025-12-11 15:24:50][DEBUG] Цвет 1: экзаменов=3, средняя_сложность=3.333333
+[2025-12-11 15:24:50][INFO] Цвет 0 (avgDifficulty=3.333333) -> слот 1 (2025-01-20)
+[2025-12-11 15:24:50][INFO] Цвет 1 (avgDifficulty=3.333333) -> слот 2 (2025-01-20)
+[2025-12-11 15:24:50][DEBUG] Назначаем exam id=1 (groupId=1, color=0) в слот id=1
+[2025-12-11 15:24:50][INFO] Экзамен id=1 назначен в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:24:50][DEBUG] Назначаем exam id=2 (groupId=1, color=1) в слот id=2
+[2025-12-11 15:24:50][INFO] Экзамен id=2 назначен в аудиторию Кабинет 418 (capacity=35)
+[2025-12-11 15:24:50][DEBUG] Назначаем exam id=3 (groupId=2, color=0) в слот id=1
+[2025-12-11 15:24:50][INFO] Экзамен id=3 назначен в аудиторию Кабинет 400 (capacity=30)
+[2025-12-11 15:24:50][DEBUG] Назначаем exam id=4 (groupId=3, color=1) в слот id=2
+[2025-12-11 15:24:50][INFO] Экзамен id=4 назначен в аудиторию Кабинет 400 (capacity=30)
+[2025-12-11 15:24:50][DEBUG] Назначаем exam id=5 (groupId=4, color=1) в слот id=2
+[2025-12-11 15:24:50][INFO] Экзамен id=5 назначен в аудиторию Кабинет 110 (capacity=30)
+[2025-12-11 15:24:50][DEBUG] Назначаем exam id=6 (groupId=5, color=0) в слот id=1
+[2025-12-11 15:24:50][INFO] Экзамен id=6 назначен в аудиторию Кабинет 110 (capacity=30)
+[2025-12-11 15:24:50][INFO] === Генерация расписания завершена ===
+[2025-12-11 15:24:50][INFO] === Запуск проверки расписания ===
+[2025-12-11 15:24:50][INFO] Экзаменов: 6, назначений: 6, групп: 5, преподавателей: 3, аудиторий: 4, слотов: 8
+[2025-12-11 15:24:50][INFO] Проверка расписания завершена: ошибок не обнаружено.
+[2025-12-11 15:24:50][INFO] Saved schedule id=20 for userId=1
+[2025-12-11 15:25:00][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=1
+[2025-12-11 15:25:03][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=1
+[2025-12-11 15:25:04][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=1
+[2025-12-11 15:25:04][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=1
+[2025-12-11 15:25:06][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=2
+[2025-12-11 15:25:07][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=2
+[2025-12-11 15:25:08][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=2
+[2025-12-11 15:25:08][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=2
+[2025-12-11 15:25:08][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=2
+[2025-12-11 15:25:08][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=2
+[2025-12-11 15:25:13][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=1
+[2025-12-11 15:25:26][INFO] POST /api/schedule userId=1 groups=0 teachers=0 rooms=0 subjects=0 exams=0 timeslots=8 maxPerDay=1
