@@ -62,9 +62,8 @@ UserRepository::UserRepository(ConnectionFactory& f)
 
 std::optional<DbUser> UserRepository::findUserByUsername(const std::string& username) {
     auto conn = factory.createConnection();
-    pqxx::work tx{*conn};
+    pqxx::work tx(*conn);
 
-    // Без шифрования, читаем email_plain (так как мы его так и пишем)
     auto res = tx.exec_params(
         "SELECT id, username, password_hash, role, email_plain "
         "FROM app_user "
@@ -98,7 +97,7 @@ long UserRepository::createUser(const std::string& username,
                                 const std::string& role,
                                 const std::optional<std::string>& email) {
     auto conn = factory.createConnection();
-    pqxx::work tx{*conn};
+    pqxx::work tx(*conn);
 
     pqxx::row row;
 
@@ -140,45 +139,86 @@ long ScheduleRepository::createSchedule(
     const std::optional<std::string>& name
 ) {
     auto conn = factory_.createConnection();
-    pqxx::work tx{*conn};
+    pqxx::work tx(*conn);
 
-    const char* sql = R"SQL(
-        INSERT INTO exam_schedule (user_id, name, config_json, result_json)
-        VALUES ($1, $2, $3::jsonb, $4::jsonb)
-        RETURNING id;
-    )SQL";
+    std::string nameStr = name.value_or("");
 
-    std::string nameValue = name.value_or("");
-
-    pqxx::row row = tx.exec_params1(
-        sql,
+    // is_public по умолчанию FALSE
+    auto r = tx.exec_params(
+        R"SQL(
+            INSERT INTO exam_schedule (user_id, name, config_json, result_json, is_public)
+            VALUES ($1, $2, $3, $4, FALSE)
+            RETURNING id
+        )SQL",
         userId,
-        nameValue,
+        nameStr,
         configJson,
         resultJson
     );
 
+    long newId = r[0]["id"].as<long>();
+    tx.commit();
+    return newId;
+}
+
+std::optional<DbSchedule> ScheduleRepository::findPublishedSchedule() {
+    auto conn = factory_.createConnection();
+    pqxx::work tx(*conn);
+
+    auto r = tx.exec(
+        R"SQL(
+            SELECT
+                id,
+                user_id,
+                COALESCE(name, '')      AS name,
+                config_json::text       AS config_json,
+                result_json::text       AS result_json,
+                created_at,
+                updated_at,
+                is_public
+            FROM exam_schedule
+            WHERE is_public = TRUE
+            ORDER BY published_at DESC, id DESC
+            LIMIT 1
+        )SQL"
+    );
+
     tx.commit();
 
-    long id = row["id"].as<long>();
-    return id;
+    if (r.empty()) {
+        return std::nullopt;
+    }
+
+    const auto& row = r[0];
+    DbSchedule s;
+    s.id          = row["id"].as<long>();
+    s.userId      = row["user_id"].as<long>();
+    s.name        = row["name"].as<std::string>("");
+    s.configJson  = row["config_json"].as<std::string>("");
+    s.resultJson  = row["result_json"].as<std::string>("");
+    s.createdAt   = row["created_at"].as<std::string>("");
+    s.updatedAt   = row["updated_at"].as<std::string>("");
+    s.isPublished = row["is_public"].as<bool>(false);
+
+    return s;
 }
 
 std::vector<DbSchedule> ScheduleRepository::findSchedulesByUser(long userId) {
     std::vector<DbSchedule> result;
 
     auto conn = factory_.createConnection();
-    pqxx::work tx{*conn};
+    pqxx::work tx(*conn);
 
     const char* sql = R"SQL(
         SELECT
             id,
             user_id,
-            COALESCE(name, '') AS name,
-            config_json::text AS config_json,
-            result_json::text AS result_json,
+            COALESCE(name, '')        AS name,
+            config_json::text         AS config_json,
+            result_json::text         AS result_json,
             created_at,
-            updated_at
+            updated_at,
+            is_public
         FROM exam_schedule
         WHERE user_id = $1
         ORDER BY created_at DESC, id DESC;
@@ -194,8 +234,9 @@ std::vector<DbSchedule> ScheduleRepository::findSchedulesByUser(long userId) {
         s.name       = r["name"].as<std::string>();
         s.configJson = r["config_json"].as<std::string>();
         s.resultJson = r["result_json"].as<std::string>();
-        s.createdAt  = r["created_at"].c_str();
-        s.updatedAt  = r["updated_at"].c_str();
+        s.createdAt  = r["created_at"].as<std::string>();
+        s.updatedAt  = r["updated_at"].as<std::string>();
+        s.isPublished = r["is_public"].as<bool>(false);
         result.push_back(std::move(s));
     }
 
@@ -207,17 +248,18 @@ std::optional<DbSchedule> ScheduleRepository::findScheduleById(
     long scheduleId
 ) {
     auto conn = factory_.createConnection();
-    pqxx::work tx{*conn};
+    pqxx::work tx(*conn);
 
     const char* sql = R"SQL(
         SELECT
             id,
             user_id,
-            COALESCE(name, '') AS name,
-            config_json::text AS config_json,
-            result_json::text AS result_json,
+            COALESCE(name, '')        AS name,
+            config_json::text         AS config_json,
+            result_json::text         AS result_json,
             created_at,
-            updated_at
+            updated_at,
+            is_public
         FROM exam_schedule
         WHERE id = $1
           AND user_id = $2
@@ -239,18 +281,41 @@ std::optional<DbSchedule> ScheduleRepository::findScheduleById(
     s.name       = r["name"].as<std::string>();
     s.configJson = r["config_json"].as<std::string>();
     s.resultJson = r["result_json"].as<std::string>();
-    s.createdAt  = r["created_at"].c_str();
-    s.updatedAt  = r["updated_at"].c_str();
+    s.createdAt  = r["created_at"].as<std::string>();
+    s.updatedAt  = r["updated_at"].as<std::string>();
+    s.isPublished = r["is_public"].as<bool>(false);
 
     return s;
 }
 
-// ==================== DomainData (пока заглушки) ====================
-//
-// Если хочешь реально грузить группы/преподов/предметы из БД,
-// сюда позже добавим нормальную реализацию. Пока сделаем заглушки,
-// чтобы линковка не ругалась, и они просто не будут использоваться.
-//
+bool ScheduleRepository::publishSchedule(long scheduleId) {
+    auto conn = factory_.createConnection();
+    pqxx::work tx(*conn);
+
+    // Сбрасываем флаг у всех
+    tx.exec("UPDATE exam_schedule SET is_public = FALSE");
+
+    // Помечаем нужное расписание опубликованным
+    const char* sql = R"SQL(
+        UPDATE exam_schedule
+        SET is_public = TRUE,
+            published_at = NOW()
+        WHERE id = $1
+        RETURNING id;
+    )SQL";
+
+    pqxx::result r = tx.exec_params(sql, scheduleId);
+
+    if (r.empty()) {
+        tx.commit();
+        return false; // такого расписания нет
+    }
+
+    tx.commit();
+    return true;
+}
+
+// ==================== DomainData заглушки ====================
 
 std::vector<Group> loadGroups(ConnectionFactory& /*factory*/) {
     return {};

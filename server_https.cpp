@@ -197,7 +197,8 @@ int main() {
             return 1;
         }
 
-	svr.Get("/api/public/schedule", [&](const httplib::Request& req, httplib::Response& res) {
+// --- Публичное расписание, доступное всем (гости/студенты) ---
+svr.Get("/api/public/schedule", [&](const httplib::Request& req, httplib::Response& res) {
     res.set_header("Access-Control-Allow-Origin", "*");
     res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -206,19 +207,22 @@ int main() {
         auto conn = dbFactory.createConnection();
         pqxx::work tx{*conn};
 
-        // Берём последнее по времени расписание
+        // Берём последнее опубликованное расписание
         auto r = tx.exec(
-            "SELECT result_json "
-            "FROM exam_schedule "
-            "ORDER BY created_at DESC "
-            "LIMIT 1"
+            R"SQL(
+                SELECT result_json::text
+                FROM exam_schedule
+                WHERE is_public = TRUE
+                ORDER BY published_at DESC, id DESC
+                LIMIT 1
+            )SQL"
         );
         tx.commit();
 
         if (r.empty()) {
             res.status = 404;
             res.set_content(
-                R"({"error":"no_schedule"})",
+                R"({"error":"no_published_schedule"})",
                 "application/json; charset=utf-8"
             );
             return;
@@ -245,6 +249,7 @@ svr.Options("/api/public/schedule", [](const httplib::Request& req, httplib::Res
     res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.status = 204;
 });
+
 
         // --- корень ---
         svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
@@ -676,6 +681,104 @@ svr.Options("/api/auth/logout", [](const httplib::Request& req, httplib::Respons
             res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
             res.status = 204;
         });
+
+	// --- POST /api/admin/schedule/publish ---
+// --- POST /api/admin/schedule/publish --- публикация расписания ---
+svr.Post("/api/admin/schedule/publish", [&](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    // 1. Проверяем JWT
+    auto payloadOpt = getUserFromRequest(req, jwtSecret);
+    if (!payloadOpt.has_value()) {
+        res.status = 401;
+        res.set_content(
+            R"({"error":"unauthorized"})",
+            "application/json; charset=utf-8"
+        );
+        return;
+    }
+    const auto& p = *payloadOpt;
+
+    if (p.role != "admin") {
+        res.status = 403;
+        res.set_content(
+            R"({"error":"forbidden"})",
+            "application/json; charset=utf-8"
+        );
+        return;
+    }
+
+    // 2. Разбираем JSON: scheduleId
+    long scheduleId = 0;
+    try {
+        json j = json::parse(req.body);
+        if (!j.contains("scheduleId") || !j["scheduleId"].is_number_integer()) {
+            res.status = 400;
+            res.set_content(
+                R"({"error":"bad_request","message":"scheduleId is required"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        scheduleId = j["scheduleId"].get<long>();
+    } catch (...) {
+        res.status = 400;
+        res.set_content(
+            R"({"error":"invalid_json"})",
+            "application/json; charset=utf-8"
+        );
+        return;
+    }
+
+    // 3. Проверяем, что расписание вообще существует и принадлежит этому админу
+    try {
+        auto schedOpt = scheduleRepo.findScheduleById(p.userId, scheduleId);
+        if (!schedOpt.has_value()) {
+            res.status = 404;
+            res.set_content(
+                R"({"error":"not_found"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        bool okPub = scheduleRepo.publishSchedule(scheduleId);
+        if (!okPub) {
+            res.status = 500;
+            res.set_content(
+                R"({"error":"publish_failed"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        json resp = {
+            {"ok", true},
+            {"scheduleId", scheduleId}
+        };
+
+        res.status = 200;
+        res.set_content(resp.dump(), "application/json; charset=utf-8");
+    } catch (const std::exception& ex) {
+        logError(std::string("Error in /api/admin/schedule/publish: ") + ex.what());
+        res.status = 500;
+        res.set_content(
+            R"({"error":"internal server error"})",
+            "application/json; charset=utf-8"
+        );
+    }
+});
+
+svr.Options("/api/admin/schedule/publish", [](const httplib::Request& req, httplib::Response& res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.status = 204;
+});
+
 
         // --- health-check БД ---
         svr.Get("/api/health/db", [&](const httplib::Request& req, httplib::Response& res) {

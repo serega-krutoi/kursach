@@ -67,6 +67,7 @@ struct DbSchedule {
     std::string resultJson;  // JSON-строка результата
     std::string createdAt;
     std::string updatedAt;
+    bool isPublished;
 };
 
 // --- Репозиторий расписаний ---
@@ -83,11 +84,15 @@ public:
         const std::optional<std::string>& name = std::nullopt
     );
 
-    // Список всех расписаний пользователя
+    std::optional<DbSchedule> findPublishedSchedule();
+
     std::vector<DbSchedule> findSchedulesByUser(long userId);
 
     // Одно расписание по id, только если принадлежит userId
     std::optional<DbSchedule> findScheduleById(long userId, long scheduleId);
+
+    // Пометить расписание опубликованным (сбрасывает флаг у остальных)
+    bool publishSchedule(long scheduleId);
 
 private:
     ConnectionFactory& factory_;
