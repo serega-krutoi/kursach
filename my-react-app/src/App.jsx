@@ -30,20 +30,18 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
+  // --- авторизация ---
+  const [user, setUser] = useState(null); // { id, username, role } или null
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+
   // исходные данные (config)
   const [config, setConfig] = useState(createEmptyConfig());
 
   // какую сущность редактируем сейчас (таб)
   const [configTab, setConfigTab] = useState("groups"); // groups | teachers | subjects | rooms | exams | session
-
-  // --- авторизация ---
-  const [user, setUser] = useState(null); // { id, username, role } или null
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [loginForm, setLoginForm] = useState({
-    username: "",
-    password: "",
-  });
 
   // палитра для тем
   const palette =
@@ -77,31 +75,40 @@ function App() {
           emptyText: "#9ca3af",
         };
 
-  // при загрузке страницы пробуем узнать текущего пользователя по куке
+  // --- проверка авторизации при загрузке ---
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => {
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then((data) => {
-        if (data && data.ok && data.user) {
-          setUser(data.user);
+    const checkAuth = async () => {
+      try {
+        setAuthLoading(true);
+        setAuthError(null);
+        const res = await fetch("/api/auth/me", {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          setUser(null);
+          return;
         }
-      })
-      .catch(() => {
-        // тихо игнорируем, просто считаем, что не залогинен
-      });
+        const json = await res.json();
+        if (json.ok && json.user) {
+          setUser(json.user);
+        } else {
+          setUser(null);
+        }
+      } catch (e) {
+        console.error("auth/me error", e);
+        setUser(null);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+
+    checkAuth();
   }, []);
 
-  const handleLoginInputChange = (e) => {
-    const { name, value } = e.target;
-    setLoginForm((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleLoginSubmit = async (e) => {
+  // --- вход ---
+  const handleLogin = async (e) => {
     e.preventDefault();
-    setAuthError("");
+    setAuthError(null);
     setErrorMsg(null);
     setAuthLoading(true);
 
@@ -111,9 +118,10 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({
-          username: loginForm.username,
-          password: loginForm.password,
+          username: loginUsername,
+          password: loginPassword,
         }),
       });
 
@@ -128,28 +136,30 @@ function App() {
         return;
       }
 
-      const data = await res.json();
-      if (data.ok && data.user) {
-        setUser(data.user);
-        setLoginForm({ username: "", password: "" });
-        setAuthError("");
+      const json = await res.json();
+      if (json.ok && json.user) {
+        setUser(json.user);
+        setLoginUsername("");
+        setLoginPassword("");
+        setAuthError(null);
       } else {
         setAuthError("Некорректный ответ сервера");
       }
     } catch (err) {
+      console.error("login error", err);
       setAuthError("Сетевая ошибка");
     } finally {
       setAuthLoading(false);
     }
   };
 
+  // --- выход (пока только локально) ---
   const handleLogout = () => {
-    // пока просто чистим фронтовое состояние
     setUser(null);
-    // при желании потом сделаем /api/auth/logout с очисткой куки
+    // при желании потом сделаем /api/auth/logout, который будет очищать куку на бэке
   };
 
-  // запрос к C++ серверу
+  // --- запрос к C++ серверу ---
   const handleGenerate = async () => {
     // защита: без входа не дергаем API
     if (!user) {
@@ -171,6 +181,7 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include", // важно для auth_token
         body: JSON.stringify(payload),
       });
 
@@ -1461,8 +1472,8 @@ function App() {
               <div>
                 <div>
                   Вход выполнен как{" "}
-                  <b>{user.username || `user#${user.id}`}</b>{" "}
-                  ({user.role})
+                  <b>{user.username || `user#${user.id}`}</b> (
+                  {user.role})
                 </div>
                 <div
                   style={{
@@ -1471,8 +1482,8 @@ function App() {
                     marginTop: "2px",
                   }}
                 >
-                  Вы можете генерировать расписание и, при роли
-                  admin, пользоваться админскими функциями.
+                  Вы можете генерировать расписание и просматривать свои
+                  сохранённые варианты (через API).
                 </div>
               </div>
               <button
@@ -1492,7 +1503,7 @@ function App() {
             </div>
           ) : (
             <form
-              onSubmit={handleLoginSubmit}
+              onSubmit={handleLogin}
               style={{
                 display: "flex",
                 flexWrap: "wrap",
@@ -1503,10 +1514,9 @@ function App() {
               <span>Вход:</span>
               <input
                 type="text"
-                name="username"
                 placeholder="Логин"
-                value={loginForm.username}
-                onChange={handleLoginInputChange}
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
                 style={{
                   padding: "4px 8px",
                   borderRadius: "8px",
@@ -1519,10 +1529,9 @@ function App() {
               />
               <input
                 type="password"
-                name="password"
                 placeholder="Пароль"
-                value={loginForm.password}
-                onChange={handleLoginInputChange}
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
                 style={{
                   padding: "4px 8px",
                   borderRadius: "8px",
@@ -2036,4 +2045,3 @@ function App() {
 }
 
 export default App;
-
