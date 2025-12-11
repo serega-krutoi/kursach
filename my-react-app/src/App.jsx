@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { mockResponseGraph } from "./mockData";
 
 function createEmptyConfig() {
@@ -36,6 +36,15 @@ function App() {
   // какую сущность редактируем сейчас (таб)
   const [configTab, setConfigTab] = useState("groups"); // groups | teachers | subjects | rooms | exams | session
 
+  // --- авторизация ---
+  const [user, setUser] = useState(null); // { id, username, role } или null
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [loginForm, setLoginForm] = useState({
+    username: "",
+    password: "",
+  });
+
   // палитра для тем
   const palette =
     theme === "dark"
@@ -68,15 +77,93 @@ function App() {
           emptyText: "#9ca3af",
         };
 
-  // запрос к C++ серверу (пока GET по algo)
+  // при загрузке страницы пробуем узнать текущего пользователя по куке
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data) => {
+        if (data && data.ok && data.user) {
+          setUser(data.user);
+        }
+      })
+      .catch(() => {
+        // тихо игнорируем, просто считаем, что не залогинен
+      });
+  }, []);
+
+  const handleLoginInputChange = (e) => {
+    const { name, value } = e.target;
+    setLoginForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    setErrorMsg(null);
+    setAuthLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: loginForm.username,
+          password: loginForm.password,
+        }),
+      });
+
+      if (!res.ok) {
+        let msg = "Ошибка входа";
+        try {
+          const err = await res.json();
+          if (err && err.error) msg = err.error;
+        } catch {}
+        setAuthError(msg);
+        setAuthLoading(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.ok && data.user) {
+        setUser(data.user);
+        setLoginForm({ username: "", password: "" });
+        setAuthError("");
+      } else {
+        setAuthError("Некорректный ответ сервера");
+      }
+    } catch (err) {
+      setAuthError("Сетевая ошибка");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    // пока просто чистим фронтовое состояние
+    setUser(null);
+    // при желании потом сделаем /api/auth/logout с очисткой куки
+  };
+
+  // запрос к C++ серверу
   const handleGenerate = async () => {
+    // защита: без входа не дергаем API
+    if (!user) {
+      setErrorMsg("Сначала войдите в систему, чтобы генерировать расписание");
+      return;
+    }
+
     setLoading(true);
     setErrorMsg(null);
 
     try {
       const payload = {
         algo: "graph", // всегда графовый алгоритм
-        config,        // весь config из редактора
+        config, // весь config из редактора
       };
 
       const resp = await fetch("/api/schedule", {
@@ -87,6 +174,11 @@ function App() {
         body: JSON.stringify(payload),
       });
 
+      if (resp.status === 401) {
+        setUser(null);
+        throw new Error("unauthorized");
+      }
+
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
@@ -95,13 +187,15 @@ function App() {
       setData(json);
     } catch (e) {
       console.error(e);
-      setErrorMsg("Не удалось получить данные от сервера");
+      if (e.message === "unauthorized") {
+        setErrorMsg("Сессия истекла или неактивна. Войдите снова.");
+      } else {
+        setErrorMsg("Не удалось получить данные от сервера");
+      }
     } finally {
       setLoading(false);
     }
   };
-
-
 
   // ЗАГРУЗКА JSON-ФАЙЛА (config + result)
   const handleImportJson = (event) => {
@@ -162,7 +256,7 @@ function App() {
     });
     return Array.from(set).sort();
   }, [data]);
-  
+
   const teacherOptions = useMemo(() => {
     const set = new Set();
     data.schedule.forEach((item) => {
@@ -170,7 +264,7 @@ function App() {
     });
     return Array.from(set).sort();
   }, [data]);
-  
+
   const subjectOptions = useMemo(() => {
     const set = new Set();
     data.schedule.forEach((item) => {
@@ -178,7 +272,7 @@ function App() {
     });
     return Array.from(set).sort();
   }, [data]);
-  
+
   // фильтруем расписание по группе + преподавателю + предмету
   const filteredSchedule = useMemo(() => {
     return data.schedule.filter((item) => {
@@ -1340,12 +1434,154 @@ function App() {
           border: `1px solid ${palette.cardBorder}`,
         }}
       >
+        {/* ПАНЕЛЬ АВТОРИЗАЦИИ */}
+        <div
+          style={{
+            marginBottom: "16px",
+            padding: "10px 12px",
+            borderRadius: "12px",
+            border: `1px solid ${palette.cardBorder}`,
+            background:
+              theme === "dark"
+                ? "rgba(15,23,42,0.9)"
+                : "rgba(249,250,251,1)",
+            fontSize: "13px",
+          }}
+        >
+          {user ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div>
+                <div>
+                  Вход выполнен как{" "}
+                  <b>{user.username || `user#${user.id}`}</b>{" "}
+                  ({user.role})
+                </div>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: palette.textMuted,
+                    marginTop: "2px",
+                  }}
+                >
+                  Вы можете генерировать расписание и, при роли
+                  admin, пользоваться админскими функциями.
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "9999px",
+                  border: "none",
+                  background: "rgba(148,163,184,0.2)",
+                  color: palette.textMain,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Выйти
+              </button>
+            </div>
+          ) : (
+            <form
+              onSubmit={handleLoginSubmit}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                alignItems: "center",
+              }}
+            >
+              <span>Вход:</span>
+              <input
+                type="text"
+                name="username"
+                placeholder="Логин"
+                value={loginForm.username}
+                onChange={handleLoginInputChange}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: "8px",
+                  border: `1px solid ${palette.cardBorder}`,
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
+                  color: palette.textMain,
+                  fontSize: "13px",
+                }}
+              />
+              <input
+                type="password"
+                name="password"
+                placeholder="Пароль"
+                value={loginForm.password}
+                onChange={handleLoginInputChange}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: "8px",
+                  border: `1px solid ${palette.cardBorder}`,
+                  background:
+                    theme === "dark" ? "#020617" : "#ffffff",
+                  color: palette.textMain,
+                  fontSize: "13px",
+                }}
+              />
+              <button
+                type="submit"
+                disabled={authLoading}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "9999px",
+                  border: "none",
+                  background:
+                    "linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #22c55e 100%)",
+                  color: "#02120a",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  opacity: authLoading ? 0.8 : 1,
+                }}
+              >
+                {authLoading ? "Входим..." : "Войти"}
+              </button>
+              {authError && (
+                <span
+                  style={{
+                    color: "#b91c1c",
+                    fontSize: "12px",
+                    marginLeft: "4px",
+                  }}
+                >
+                  {authError}
+                </span>
+              )}
+              {!authError && (
+                <span
+                  style={{
+                    color: palette.textMuted,
+                    fontSize: "12px",
+                  }}
+                >
+                  Для генерации расписания требуется вход.
+                </span>
+              )}
+            </form>
+          )}
+        </div>
+
         {/* ШАПКА */}
         <header
           style={{
             marginBottom: "20px",
             display: "flex",
-            justifyContent: "space между",
+            justifyContent: "space-between",
             gap: "16px",
             alignItems: "center",
             flexWrap: "wrap",
@@ -1400,6 +1636,12 @@ function App() {
 
             <button
               onClick={handleGenerate}
+              disabled={!user || loading}
+              title={
+                !user
+                  ? "Нужно войти, чтобы генерировать расписание"
+                  : ""
+              }
               style={{
                 padding: "8px 14px",
                 borderRadius: "9999px",
@@ -1409,7 +1651,8 @@ function App() {
                 color: "#02120a",
                 fontWeight: 600,
                 fontSize: "13px",
-                cursor: "pointer",
+                cursor: !user || loading ? "not-allowed" : "pointer",
+                opacity: !user || loading ? 0.7 : 1,
               }}
             >
               Сгенерировать
@@ -1635,152 +1878,162 @@ function App() {
         )}
 
         {/* Фильтры по расписанию */}
-          <div
+        <div
+          style={{
+            marginTop: "16px",
+            marginBottom: "12px",
+            display: "flex",
+            gap: "8px",
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontSize: "13px", color: palette.textMuted }}>
+            Фильтры:
+          </span>
+
+          {/* Фильтр по группе */}
+          <select
+            value={selectedGroup}
+            onChange={(e) => setSelectedGroup(e.target.value)}
             style={{
-              marginTop: "16px",
-              marginBottom: "12px",
-              display: "flex",
-              gap: "8px",
-              flexWrap: "wrap",
-              alignItems: "center",
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              border: "1px solid #4b5563",
+              background: theme === "dark" ? "#020617" : "#ffffff",
+              color: palette.textMain,
+              fontSize: "13px",
             }}
           >
-            <span style={{ fontSize: "13px", color: palette.textMuted }}>Фильтры:</span>
+            <option value="all">Все группы</option>
+            {groupOptions.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
 
-            {/* Фильтр по группе */}
-            <select
-              value={selectedGroup}
-              onChange={(e) => setSelectedGroup(e.target.value)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: "9999px",
-                border: "1px solid #4b5563",
-                background: theme === "dark" ? "#020617" : "#ffffff",
-                color: palette.textMain,
-                fontSize: "13px",
-              }}
-            >
-              <option value="all">Все группы</option>
-              {groupOptions.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-
-            {/* Фильтр по преподавателю */}
-            <select
-              value={selectedTeacher}
-              onChange={(e) => setSelectedTeacher(e.target.value)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: "9999px",
-                border: "1px solid #4b5563",
-                background: theme === "dark" ? "#020617" : "#ffffff",
-                color: palette.textMain,
-                fontSize: "13px",
-              }}
-            >
-              <option value="all">Все преподаватели</option>
-              {teacherOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-
-            {/* Фильтр по предмету */}
-            <select
-              value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: "9999px",
-                border: "1px solid #4b5563",
-                background: theme === "dark" ? "#020617" : "#ffffff",
-                color: palette.textMain,
-                fontSize: "13px",
-              }}
-            >
-              <option value="all">Все предметы</option>
-              {subjectOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Таблица расписания */}
-          <div
+          {/* Фильтр по преподавателю */}
+          <select
+            value={selectedTeacher}
+            onChange={(e) => setSelectedTeacher(e.target.value)}
             style={{
-              borderRadius: "12px",
-              overflow: "hidden",
-              border: `1px solid ${palette.tableBorder}`,
-              marginTop: "8px",
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              border: "1px solid #4b5563",
+              background: theme === "dark" ? "#020617" : "#ffffff",
+              color: palette.textMain,
+              fontSize: "13px",
             }}
           >
-            {filteredSchedule.length === 0 ? (
-              <div
-                style={{
-                  padding: "12px 14px",
-                  color: palette.emptyText,
-                  fontSize: "13px",
-                }}
-              >
-                Нет записей для выбранных фильтров
-              </div>
-            ) : (
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: "13px",
-                }}
-              >
-                <thead style={{ background: "#1e40af" }}>
-                  <tr>
-                    <th style={thStyle}>Дата</th>
-                    <th style={thStyle}>Время</th>
-                    <th style={thStyle}>Группа</th>
-                    <th style={thStyle}>Предмет</th>
-                    <th style={thStyle}>Преподаватель</th>
-                    <th style={thStyle}>Аудитория</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSchedule.map((item, index) => {
-                    const isEven = index % 2 === 0;
-                    const rowBaseColor = isEven ? palette.rowBg : palette.rowAltBg;
-                    return (
-                      <tr
-                        key={index}
-                        style={{ ...baseRowStyle, backgroundColor: rowBaseColor }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = palette.rowHoverBg;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = rowBaseColor;
-                        }}
-                      >
-                        <td style={tdStyle}>{item.date}</td>
-                        <td style={tdStyle}>
-                          {item.startTime}–{item.endTime}
-                        </td>
-                        <td style={tdStyle}>{item.groupName}</td>
-                        <td style={tdStyle}>{item.subjectName}</td>
-                        <td style={tdStyle}>{item.teacherName}</td>
-                        <td style={tdStyle}>{item.roomName}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
+            <option value="all">Все преподаватели</option>
+            {teacherOptions.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+
+          {/* Фильтр по предмету */}
+          <select
+            value={selectedSubject}
+            onChange={(e) => setSelectedSubject(e.target.value)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              border: "1px solid #4b5563",
+              background: theme === "dark" ? "#020617" : "#ffffff",
+              color: palette.textMain,
+              fontSize: "13px",
+            }}
+          >
+            <option value="all">Все предметы</option>
+            {subjectOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Таблица расписания */}
+        <div
+          style={{
+            borderRadius: "12px",
+            overflow: "hidden",
+            border: `1px solid ${palette.tableBorder}`,
+            marginTop: "8px",
+          }}
+        >
+          {filteredSchedule.length === 0 ? (
+            <div
+              style={{
+                padding: "12px 14px",
+                color: palette.emptyText,
+                fontSize: "13px",
+              }}
+            >
+              Нет записей для выбранных фильтров
+            </div>
+          ) : (
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "13px",
+              }}
+            >
+              <thead style={{ background: "#1e40af" }}>
+                <tr>
+                  <th style={thStyle}>Дата</th>
+                  <th style={thStyle}>Время</th>
+                  <th style={thStyle}>Группа</th>
+                  <th style={thStyle}>Предмет</th>
+                  <th style={thStyle}>Преподаватель</th>
+                  <th style={thStyle}>Аудитория</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSchedule.map((item, index) => {
+                  const isEven = index % 2 === 0;
+                  const rowBaseColor = isEven
+                    ? palette.rowBg
+                    : palette.rowAltBg;
+                  return (
+                    <tr
+                      key={index}
+                      style={{
+                        ...baseRowStyle,
+                        backgroundColor: rowBaseColor,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor =
+                          palette.rowHoverBg;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor =
+                          rowBaseColor;
+                      }}
+                    >
+                      <td style={tdStyle}>{item.date}</td>
+                      <td style={tdStyle}>
+                        {item.startTime}–{item.endTime}
+                      </td>
+                      <td style={tdStyle}>{item.groupName}</td>
+                      <td style={tdStyle}>{item.subjectName}</td>
+                      <td style={tdStyle}>{item.teacherName}</td>
+                      <td style={tdStyle}>{item.roomName}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 export default App;
+

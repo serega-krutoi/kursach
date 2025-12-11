@@ -100,3 +100,21 @@ CREATE TABLE IF NOT EXISTS app_user (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS exam_schedule (
+    id          BIGSERIAL PRIMARY KEY,
+
+    user_id     BIGINT NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+
+    -- config, который пришёл с фронта (groups, teachers, rooms, subjects, exams, session)
+    config_json JSONB NOT NULL,
+
+    -- результат генерации (то, что сейчас бэкенд возвращает фронту)
+    result_json JSONB NOT NULL,
+
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_exam_schedule_user_id
+    ON exam_schedule(user_id);

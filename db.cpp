@@ -1,10 +1,130 @@
 #include "db.h"
+
+#include <iostream>
+#include <optional>
+#include <vector>
+#include <string>
 #include <cstdlib>
 #include <stdexcept>
 #include <sstream>
 #include <memory>
 
 #include <pqxx/pqxx>
+
+namespace db {
+long ScheduleRepository::createSchedule(
+    long userId,
+    const std::string& configJson,
+    const std::string& resultJson,
+    const std::optional<std::string>& name
+) {
+    auto conn = factory_.createConnection();
+    pqxx::work tx{*conn};
+
+    const char* sql = R"SQL(
+        INSERT INTO exam_schedule (user_id, name, config_json, result_json)
+        VALUES ($1, $2, $3::jsonb, $4::jsonb)
+        RETURNING id;
+    )SQL";
+
+    std::string nameValue = name.value_or("");
+
+    pqxx::row row = tx.exec_params1(
+        sql,
+        userId,
+        nameValue,
+        configJson,
+        resultJson
+    );
+
+    tx.commit();
+
+    long id = row["id"].as<long>();
+    return id;
+}
+
+std::vector<DbSchedule> ScheduleRepository::findSchedulesByUser(long userId) {
+    std::vector<DbSchedule> result;
+
+    auto conn = factory_.createConnection();
+    pqxx::work tx{*conn};
+
+    const char* sql = R"SQL(
+        SELECT
+            id,
+            user_id,
+            COALESCE(name, '') AS name,
+            config_json::text AS config_json,
+            result_json::text AS result_json,
+            created_at,
+            updated_at
+        FROM exam_schedule
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC;
+    )SQL";
+
+    pqxx::result rows = tx.exec_params(sql, userId);
+    tx.commit();
+
+    for (const auto& r : rows) {
+        DbSchedule s;
+        s.id         = r["id"].as<long>();
+        s.userId     = r["user_id"].as<long>();
+        s.name       = r["name"].as<std::string>();
+        s.configJson = r["config_json"].as<std::string>();
+        s.resultJson = r["result_json"].as<std::string>();
+        s.createdAt  = r["created_at"].c_str();
+        s.updatedAt  = r["updated_at"].c_str();
+        result.push_back(std::move(s));
+    }
+
+    return result;
+}
+
+std::optional<DbSchedule> ScheduleRepository::findScheduleById(
+    long userId,
+    long scheduleId
+) {
+    auto conn = factory_.createConnection();
+    pqxx::work tx{*conn};
+
+    const char* sql = R"SQL(
+        SELECT
+            id,
+            user_id,
+            COALESCE(name, '') AS name,
+            config_json::text AS config_json,
+            result_json::text AS result_json,
+            created_at,
+            updated_at
+        FROM exam_schedule
+        WHERE id = $1
+          AND user_id = $2
+        LIMIT 1;
+    )SQL";
+
+    pqxx::result rows = tx.exec_params(sql, scheduleId, userId);
+    tx.commit();
+
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    const auto& r = rows[0];
+
+    DbSchedule s;
+    s.id         = r["id"].as<long>();
+    s.userId     = r["user_id"].as<long>();
+    s.name       = r["name"].as<std::string>();
+    s.configJson = r["config_json"].as<std::string>();
+    s.resultJson = r["result_json"].as<std::string>();
+    s.createdAt  = r["created_at"].c_str();
+    s.updatedAt  = r["updated_at"].c_str();
+
+    return s;
+}
+
+}
 
 namespace db {
 
@@ -105,27 +225,37 @@ long UserRepository::createUser(const std::string& username,
     auto conn = factory.createConnection();
     pqxx::work tx{*conn};
 
-    pqxx::result res;
-    if (email.has_value()) {
-        res = tx.exec_params(
-            "INSERT INTO app_user (username, password_hash, role, email_plain, email_encrypted) "
-            "VALUES ($1, $2, $3, $4, "
-            "        pgp_sym_encrypt($4, current_setting('app.crypto_key'))) "
-            "RETURNING id",
-            username, passwordHash, role, email.value()
+    pqxx::row row;
+
+    if (email.has_value() && !email->empty()) {
+        // Пишем email только в email_plain, без шифрования
+        row = tx.exec_params1(
+            R"SQL(
+                INSERT INTO app_user (username, password_hash, role, email_plain)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            )SQL",
+            username,
+            passwordHash,
+            role,
+            *email
         );
     } else {
-        res = tx.exec_params(
-            "INSERT INTO app_user (username, password_hash, role) "
-            "VALUES ($1, $2, $3) "
-            "RETURNING id",
-            username, passwordHash, role
+        // email не передали — просто создаём юзера
+        row = tx.exec_params1(
+            R"SQL(
+                INSERT INTO app_user (username, password_hash, role)
+                VALUES ($1, $2, $3)
+                RETURNING id
+            )SQL",
+            username,
+            passwordHash,
+            role
         );
     }
 
-    long id = res[0]["id"].as<long>();
     tx.commit();
-    return id;
+    return row["id"].as<long>();
 }
 
 }

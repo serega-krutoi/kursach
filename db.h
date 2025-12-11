@@ -63,6 +63,41 @@ public:
 private:
     ConnectionFactory& factory;
 };
+}
+
+namespace db {
+    struct DbSchedule {
+    long id;
+    long userId;
+    std::string name;        // может быть пустой
+    std::string configJson;  // JSON-строка config
+    std::string resultJson;  // JSON-строка результата
+    std::string createdAt;
+    std::string updatedAt;
+};
+
+class ScheduleRepository {
+public:
+    explicit ScheduleRepository(ConnectionFactory& factory)
+        : factory_(factory) {}
+
+    // Создаёт расписание и возвращает его id
+    long createSchedule(
+        long userId,
+        const std::string& configJson,
+        const std::string& resultJson,
+        const std::optional<std::string>& name = std::nullopt
+    );
+
+    // На будущее: список расписаний пользователя
+    std::vector<DbSchedule> findSchedulesByUser(long userId);
+
+    // На будущее: одно расписание по id, но только если оно принадлежит userId
+    std::optional<DbSchedule> findScheduleById(long userId, long scheduleId);
+
+private:
+    ConnectionFactory& factory_;
+};
 
 }
 
