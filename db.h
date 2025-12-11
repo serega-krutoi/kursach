@@ -6,10 +6,12 @@
 #include <string>
 #include <optional>
 #include <vector>
+
 #include "model.h"
 
 namespace db {
 
+// --- Пользователь в БД ---
 struct DbUser {
     long id;
     std::string username;
@@ -18,10 +20,7 @@ struct DbUser {
     std::optional<std::string> email;  
 };
 
-}
-
-namespace db {
-
+// --- Конфиг подключения к БД ---
 struct DbConfig {
     std::string host;
     int         port;
@@ -32,10 +31,7 @@ struct DbConfig {
     static DbConfig fromEnv();
 };
 
-}
-
-namespace db {
-
+// --- Фабрика соединений ---
 class ConnectionFactory {
 public:
     explicit ConnectionFactory(const DbConfig& cfg);
@@ -46,15 +42,13 @@ private:
     DbConfig config;
 };
 
-}
-
-namespace db {
-
+// --- Репозиторий пользователей ---
 class UserRepository {
 public:
     explicit UserRepository(ConnectionFactory& factory);
 
     std::optional<DbUser> findUserByUsername(const std::string& username);
+
     long createUser(const std::string& username,
                     const std::string& passwordHash,
                     const std::string& role,
@@ -63,10 +57,9 @@ public:
 private:
     ConnectionFactory& factory;
 };
-}
 
-namespace db {
-    struct DbSchedule {
+// --- Расписание, сохранённое в БД ---
+struct DbSchedule {
     long id;
     long userId;
     std::string name;        // может быть пустой
@@ -76,6 +69,7 @@ namespace db {
     std::string updatedAt;
 };
 
+// --- Репозиторий расписаний ---
 class ScheduleRepository {
 public:
     explicit ScheduleRepository(ConnectionFactory& factory)
@@ -89,32 +83,28 @@ public:
         const std::optional<std::string>& name = std::nullopt
     );
 
-    // На будущее: список расписаний пользователя
+    // Список всех расписаний пользователя
     std::vector<DbSchedule> findSchedulesByUser(long userId);
 
-    // На будущее: одно расписание по id, но только если оно принадлежит userId
+    // Одно расписание по id, только если принадлежит userId
     std::optional<DbSchedule> findScheduleById(long userId, long scheduleId);
 
 private:
     ConnectionFactory& factory_;
 };
 
-}
-
-namespace db {
-
+// --- доменные данные (группы/преподы/предметы/аудитории/слоты/экзамены) ---
 struct DomainData {
-    std::vector<Group>   groups;
-    std::vector<Teacher> teachers;
-    std::vector<Subject> subjects;
-    std::vector<Room>    rooms;
+    std::vector<Group>    groups;
+    std::vector<Teacher>  teachers;
+    std::vector<Subject>  subjects;
+    std::vector<Room>     rooms;
     std::vector<Timeslot> timeslots;
-    std::vector<Exam>    exams;
+    std::vector<Exam>     exams;
 };
 
-std::vector<Group> loadGroups(ConnectionFactory& factory);
+std::vector<Group>   loadGroups(ConnectionFactory& factory);
 std::vector<Teacher> loadTeachers(ConnectionFactory& factory);
+DomainData           loadDomainData(ConnectionFactory& factory);
 
-DomainData loadDomainData(ConnectionFactory& factory);
-
-}
+} // namespace db

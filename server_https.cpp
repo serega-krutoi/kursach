@@ -248,6 +248,60 @@ int main() {
             res.status = 204;
         });
 
+	svr.Get("/api/schedule/my", [&](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+        auto payloadOpt = getUserFromRequest(req, jwtSecret);
+        if (!payloadOpt.has_value()) {
+            res.status = 401;
+            res.set_content(
+                R"({"error":"unauthorized"})",
+                "application/json; charset=utf-8"
+            );
+            return;
+        }
+
+        const auto& p = *payloadOpt; // JwtPayload { userId, role, ... }
+
+        try {
+	    auto items = scheduleRepo.findSchedulesByUser(p.userId);
+
+	    nlohmann::json arr = nlohmann::json::array();
+	    for (const auto &s : items) {
+	        nlohmann::json item;
+	        item["id"]        = s.id;
+	        item["name"]      = s.name;
+	        item["createdAt"] = s.createdAt;
+	        arr.push_back(item);
+	    }
+
+
+            nlohmann::json resp = {
+                {"ok", true},
+                {"items", arr}
+            };
+
+            res.status = 200;
+            res.set_content(resp.dump(), "application/json; charset=utf-8");
+        } catch (const std::exception &ex) {
+            logError(std::string("Error in /api/schedule/my: ") + ex.what());
+            res.status = 500;
+            res.set_content(
+                R"({"error":"internal server error"})",
+                "application/json; charset=utf-8"
+            );
+        }
+    });
+
+    svr.Options("/api/schedule/my", [](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.status = 204;
+    });
+
 	svr.Post("/api/auth/register", [&](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
